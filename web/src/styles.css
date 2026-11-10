@@ -2,7 +2,13 @@
    states. All colours are defined here. */
 
 :root {
-  color-scheme: dark;
+  /* No `color-scheme: dark` here on purpose. Browser extensions (password
+     managers and the like) lay a transparent full-page iframe over the page
+     for their own notifications. Browsers paint an iframe opaque when its
+     colour scheme differs from the element embedding it, so a dark scheme on
+     the root turns that overlay into a white sheet that hides all of Stim.
+     Dark form controls and scrollbars are requested where they are needed
+     instead (see `input` and the scrollbar rule below). */
 
   --bg: #0a0a0a;
   --side: #000000;
@@ -95,6 +101,18 @@ input {
 :focus-visible {
   outline: 2px solid var(--mark);
   outline-offset: 2px;
+}
+
+/* Leaf elements only: nothing gets injected inside an input. */
+input {
+  color-scheme: dark;
+}
+
+.table,
+.sidebar,
+.dialog,
+.crash-detail {
+  scrollbar-color: #3a3a3a transparent;
 }
 
 input[type='checkbox'],
