@@ -41,6 +41,7 @@ func (f *fake) Capabilities() client.Capabilities                  { return clie
 func (f *fake) Version(context.Context) (string, error)            { return "1", nil }
 func (f *fake) Torrents(context.Context) ([]client.Torrent, error) { return nil, nil }
 func (f *fake) Pause(context.Context, []string) error              { return nil }
+func (f *fake) Remove(context.Context, []string, bool) error       { return nil }
 
 func (f *fake) Resume(_ context.Context, hashes []string) error {
 	f.mu.Lock()
@@ -260,5 +261,23 @@ func TestStartValidation(t *testing.T) {
 	r.TargetID = "src"
 	if _, err := e.Start(r); err == nil {
 		t.Error("moving to the same client must be refused")
+	}
+}
+
+func TestBusyCoversRunningItems(t *testing.T) {
+	e, _, dst, hash := setup(t)
+	dst.checkFor = 1 << 30 // never finishes
+	job, _ := e.Start(request(hash, true, ""))
+	for e.Jobs()[0].Items[0].State != StateChecking {
+		time.Sleep(time.Millisecond)
+	}
+	busy := e.Busy()
+	if !busy["src:"+hash] || !busy["dst:"+hash] {
+		t.Fatalf("busy = %v, want source and target", busy)
+	}
+	e.Cancel(job.ID)
+	wait(t, e, job.ID)
+	if len(e.Busy()) != 0 {
+		t.Errorf("nothing should be busy after the job ended, got %v", e.Busy())
 	}
 }

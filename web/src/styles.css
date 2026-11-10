@@ -574,6 +574,39 @@ input[type='radio'] {
   margin-top: 6px;
 }
 
+/* ---------- delete ---------- */
+
+.delete-clients,
+.delete-shared {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.delete-clients li,
+.delete-shared li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.delete-shared {
+  margin: 6px 0 8px;
+}
+
+.delete-count {
+  margin-left: auto;
+  flex: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.btn-danger:hover:not(:disabled) {
+  border-color: var(--bad);
+  filter: brightness(1.08);
+}
+
 /* ---------- moves between clients ---------- */
 
 .transfers {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -324,5 +325,22 @@ func (c *Client) setRunning(ctx context.Context, hashes []string, run bool) erro
 		return fmt.Errorf("%s: HTTP %d", legacy, status)
 	}
 	remember(true)
+	return nil
+}
+
+// Remove deletes torrents, and their files when deleteData is set.
+// qBittorrent answers 200 also for hashes it does not have.
+func (c *Client) Remove(ctx context.Context, hashes []string, deleteData bool) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	form := url.Values{"hashes": {strings.Join(hashes, "|")}, "deleteFiles": {strconv.FormatBool(deleteData)}}
+	_, status, err := c.do(ctx, http.MethodPost, "/api/v2/torrents/delete", form)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("delete: HTTP %d", status)
+	}
 	return nil
 }

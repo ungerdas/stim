@@ -248,6 +248,27 @@ func (e *Engine) Jobs() []Job {
 	return out
 }
 
+// Busy reports which torrents a running job is still working on, as
+// "instanceID:hash" for both the source and the target client. They must
+// not be removed underneath it.
+func (e *Engine) Busy() map[string]bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	busy := map[string]bool{}
+	for _, j := range e.jobs {
+		if j.FinishedAt != 0 {
+			continue
+		}
+		for _, it := range j.Items {
+			if !it.State.finished() {
+				busy[it.SourceID+":"+it.Hash] = true
+				busy[j.TargetID+":"+it.Hash] = true
+			}
+		}
+	}
+	return busy
+}
+
 // Cancel stops a job. Torrents not yet handed over stay in their source; a
 // torrent whose source copy has already been removed is completed.
 func (e *Engine) Cancel(id string) bool {

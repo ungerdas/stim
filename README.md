@@ -23,6 +23,7 @@ Tidlig skjelett. Dette fungerer:
 - trackerfilter: huk av hvilke trackere som skal vises (valget huskes i nettleseren)
 - hvor mye som er lastet opp: for utvalget i sidemenyen, og per tracker og klient under «Se statistikk»
 - pause og gjenoppta, også på tvers av klienter i samme operasjon
+- slette torrenter, med eller uten filene, med varsel når andre torrenter bruker de samme filene
 - flytte torrenter mellom klienter på samme server, med valgfri flytting av filene til en ny mappe
 
 Dette mangler foreløpig: legge til og slette torrenter, detaljvisning (filer, trackere,
@@ -164,6 +165,7 @@ Webgrensesnittet henter klienttypene fra `/api/kinds` og trenger ingen endringer
 | `POST` | `/api/instances/{id}/retry` | prøv igjen etter avvist innlogging |
 | `GET` | `/api/torrents` | status per klient + alle torrenter |
 | `POST` | `/api/torrents/action` | `{"action": "pause" \| "resume", "items": [{"instanceId", "hash"}]}` |
+| `POST` | `/api/torrents/remove` | `{"items": [{"instanceId", "hash"}], "deleteData": false}`; filene slettes bare med `"deleteData": true` |
 | `GET` | `/api/transfers` | flyttejobber, nyeste først |
 | `POST` | `/api/transfers` | `{"targetId", "removeFromSource", "newPath", "items": [{"instanceId", "hash"}]}` |
 | `POST` | `/api/transfers/{id}/cancel` | avbryt en flyttejobb |

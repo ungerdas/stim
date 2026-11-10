@@ -84,6 +84,10 @@ type Client interface {
 	Torrents(ctx context.Context) ([]Torrent, error)
 	Pause(ctx context.Context, hashes []string) error
 	Resume(ctx context.Context, hashes []string) error
+	// Remove removes torrents from the client. With deleteData the client
+	// also deletes their files from disk. A torrent the client no longer
+	// has is not an error.
+	Remove(ctx context.Context, hashes []string, deleteData bool) error
 }
 
 // Totals are client-wide transfer totals in bytes, including protocol

@@ -35,6 +35,8 @@ export const api = {
   testInstance: (input: InstanceInput) => request<TestResult>('/api/instances/test', json('POST', input)),
   act: (action: 'pause' | 'resume', items: { instanceId: string; hash: string }[]) =>
     request<{ failed: Record<string, string> }>('/api/torrents/action', json('POST', { action, items })),
+  remove: (items: { instanceId: string; hash: string }[], deleteData: boolean) =>
+    request<{ failed: Record<string, string> }>('/api/torrents/remove', json('POST', { items, deleteData })),
   transfers: () => request<TransferJob[]>('/api/transfers'),
   startTransfer: (req: TransferRequest) => request<TransferJob>('/api/transfers', json('POST', req)),
   cancelTransfer: (id: string) => request<void>(`/api/transfers/${id}/cancel`, json('POST', {})),

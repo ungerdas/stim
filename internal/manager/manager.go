@@ -290,9 +290,29 @@ type Item struct {
 // Act runs "pause" or "resume" on the given torrents, grouped per instance.
 // It returns one error message per instance that failed, keyed by ID.
 func (m *Manager) Act(ctx context.Context, action string, items []Item) (map[string]string, error) {
-	if action != "pause" && action != "resume" {
+	var fn func(context.Context, client.Client, []string) error
+	switch action {
+	case "pause":
+		fn = func(ctx context.Context, c client.Client, h []string) error { return c.Pause(ctx, h) }
+	case "resume":
+		fn = func(ctx context.Context, c client.Client, h []string) error { return c.Resume(ctx, h) }
+	default:
 		return nil, fmt.Errorf("unknown action %q", action)
 	}
+	return m.perInstance(ctx, items, fn), nil
+}
+
+// Remove removes torrents from their clients, and deletes their files when
+// deleteData is set. Failures are reported per instance like Act.
+func (m *Manager) Remove(ctx context.Context, items []Item, deleteData bool) map[string]string {
+	return m.perInstance(ctx, items, func(ctx context.Context, c client.Client, hashes []string) error {
+		return c.Remove(ctx, hashes, deleteData)
+	})
+}
+
+// perInstance groups items by instance and runs fn once per instance, in
+// parallel.
+func (m *Manager) perInstance(ctx context.Context, items []Item, fn func(context.Context, client.Client, []string) error) map[string]string {
 	byInstance := map[string][]string{}
 	for _, it := range items {
 		byInstance[it.InstanceID] = append(byInstance[it.InstanceID], it.Hash)
@@ -314,26 +334,21 @@ func (m *Manager) Act(ctx context.Context, action string, items []Item) (map[str
 			continue
 		}
 		wg.Add(1)
-		go func(e *entry, hashes []string) {
+		go func(id string, e *entry, hashes []string) {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 			defer cancel()
-			var err error
-			if action == "pause" {
-				err = e.cli.Pause(ctx, hashes)
-			} else {
-				err = e.cli.Resume(ctx, hashes)
-			}
+			err := fn(ctx, e.cli, hashes)
 			e.invalidate()
 			if err != nil {
 				mu.Lock()
-				failed[e.instance().ID] = err.Error()
+				failed[id] = err.Error()
 				mu.Unlock()
 			}
-		}(e, hashes)
+		}(id, e, hashes)
 	}
 	wg.Wait()
-	return failed, nil
+	return failed
 }
 
 // Test tries to reach a client with the given settings without saving them.
@@ -362,3 +377,4 @@ func (b brokenClient) Version(context.Context) (string, error) {
 func (b brokenClient) Torrents(context.Context) ([]client.Torrent, error) { return nil, b.err }
 func (b brokenClient) Pause(context.Context, []string) error              { return b.err }
 func (b brokenClient) Resume(context.Context, []string) error             { return b.err }
+func (b brokenClient) Remove(context.Context, []string, bool) error       { return b.err }

@@ -42,6 +42,7 @@ func New(s *store.Store, m *manager.Manager, t *transfer.Engine, ui fs.FS, versi
 	mux.HandleFunc("POST /api/instances/{id}/retry", srv.retryInstance)
 	mux.HandleFunc("GET /api/torrents", srv.torrents)
 	mux.HandleFunc("POST /api/torrents/action", srv.action)
+	mux.HandleFunc("POST /api/torrents/remove", srv.remove)
 	mux.HandleFunc("GET /api/transfers", srv.listTransfers)
 	mux.HandleFunc("POST /api/transfers", srv.startTransfer)
 	mux.HandleFunc("POST /api/transfers/{id}/cancel", srv.cancelTransfer)
@@ -349,6 +350,34 @@ func testSSH(r *http.Request, in store.Instance) map[string]any {
 		res["hostKeyChanged"] = errors.Is(err, remotefiles.ErrHostKeyChanged)
 	}
 	return res
+}
+
+// remove removes torrents, and deletes their files only when the request
+// says so explicitly.
+func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Items      []manager.Item `json:"items"`
+		DeleteData bool           `json:"deleteData"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	// Leave torrents alone that a move is still working on.
+	busy := s.transfers.Busy()
+	var items []manager.Item
+	failed := map[string]string{}
+	for _, it := range req.Items {
+		if busy[it.InstanceID+":"+strings.ToLower(it.Hash)] {
+			failed[it.InstanceID] = "the torrent is being moved; cancel the move first"
+			continue
+		}
+		items = append(items, it)
+	}
+	for id, msg := range s.manager.Remove(r.Context(), items, req.DeleteData) {
+		failed[id] = msg
+	}
+	log.Printf("remove: %d torrents, delete data %v, failed on %d clients", len(items), req.DeleteData, len(failed))
+	writeJSON(w, http.StatusOK, map[string]any{"failed": failed})
 }
 
 func (s *Server) listTransfers(w http.ResponseWriter, _ *http.Request) {

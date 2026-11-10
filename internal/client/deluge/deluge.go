@@ -447,3 +447,54 @@ func (c *Client) Totals() (client.Totals, bool) {
 	defer c.totalsMu.Unlock()
 	return c.totals, c.haveTotals
 }
+
+// Remove removes torrents, and their files when deleteData is set.
+func (c *Client) Remove(ctx context.Context, hashes []string, deleteData bool) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	res, err := c.call(ctx, "core.remove_torrents", hashes, deleteData)
+	if isUnknownMethod(err) {
+		return c.removeOneByOne(ctx, hashes, deleteData) // Deluge 1.x
+	}
+	if err != nil {
+		return err
+	}
+	// Deluge 2 answers with a [torrent_id, error] pair for each failure.
+	var failures [][2]string
+	if json.Unmarshal(res, &failures) != nil {
+		return nil
+	}
+	var msgs []string
+	for _, f := range failures {
+		if !notInSession(f[1]) {
+			msgs = append(msgs, f[1])
+		}
+	}
+	if len(msgs) > 0 {
+		return fmt.Errorf("Deluge could not remove %d of the torrents: %s", len(msgs), msgs[0])
+	}
+	return nil
+}
+
+func (c *Client) removeOneByOne(ctx context.Context, hashes []string, deleteData bool) error {
+	var first error
+	failed := 0
+	for _, h := range hashes {
+		if _, err := c.call(ctx, "core.remove_torrent", h, deleteData); err != nil && !notInSession(err.Error()) {
+			failed++
+			if first == nil {
+				first = err
+			}
+		}
+	}
+	if first != nil {
+		return fmt.Errorf("Deluge could not remove %d of the torrents: %w", failed, first)
+	}
+	return nil
+}
+
+// notInSession recognises Deluge's answer for a torrent it does not have.
+func notInSession(msg string) bool {
+	return strings.Contains(msg, "not in session")
+}

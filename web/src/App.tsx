@@ -6,6 +6,7 @@ import { connectionProblem } from './text';
 import { InstanceDialog } from './components/InstanceDialog';
 import { MoveDialog } from './components/MoveDialog';
 import { StatsDialog } from './components/StatsDialog';
+import { DeleteDialog } from './components/DeleteDialog';
 import { TransferPanel } from './components/TransferPanel';
 import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
 import { TorrentTable, torrentKey, type Sort, type SortKey } from './components/TorrentTable';
@@ -53,6 +54,7 @@ export default function App() {
   const [acting, setActing] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [jobs, setJobs] = useState<TransferJob[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(() => loadSet(DISMISSED_KEY));
   // Trackers the user has unticked. Storing the hidden ones (rather than the
@@ -344,6 +346,7 @@ export default function App() {
   const closeDialog = useCallback(() => setDialog(null), []);
   const closeMove = useCallback(() => setMoveOpen(false), []);
   const closeStats = useCallback(() => setStatsOpen(false), []);
+  const closeDelete = useCallback(() => setDeleteOpen(false), []);
 
   const openEdit = async (id: string) => {
     try {
@@ -456,6 +459,14 @@ export default function App() {
             >
               Flytt til …
             </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setDeleteOpen(true)}
+              disabled={selectedTorrents.length === 0}
+            >
+              Slett …
+            </button>
           </div>
           <p className="toolbar-count" aria-live="polite">
             {selectedTorrents.length > 0
@@ -554,6 +565,35 @@ export default function App() {
           onEditInstance={(id) => {
             setMoveOpen(false);
             openEdit(id);
+          }}
+        />
+      )}
+
+      {deleteOpen && (
+        <DeleteDialog
+          torrents={selectedTorrents}
+          allTorrents={torrents}
+          instances={instances}
+          colorOf={colorOf}
+          onClose={closeDelete}
+          onDone={({ removed, deleteData, failed }) => {
+            setDeleteOpen(false);
+            const failedNames = Object.keys(failed).map((id) => instanceById.get(id)?.status.name ?? id);
+            if (failedNames.length > 0) {
+              setNotice({
+                text: `Fikk ikke slettet på ${failedNames.join(', ')}: ${Object.values(failed)[0]}`,
+                bad: true,
+              });
+            } else {
+              const noun = removed === 1 ? 'torrent' : 'torrenter';
+              setNotice({
+                text: deleteData
+                  ? `Slettet ${count(removed)} ${noun} og filene`
+                  : `Fjernet ${count(removed)} ${noun}. Filene ligger igjen.`,
+              });
+            }
+            setSelected(new Set());
+            refresh();
           }}
         />
       )}
