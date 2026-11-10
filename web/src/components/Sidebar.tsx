@@ -22,6 +22,13 @@ interface Props {
 const FIXED_STATES: StateFilter[] = ['all', 'active', 'downloading', 'seeding', 'paused', 'error'];
 const EXTRA_STATES: StateFilter[] = ['queued', 'checking', 'moving', 'unknown'];
 
+const buildStamp = new Intl.DateTimeFormat('nb-NO', {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+}).format(new Date(__BUILD_TIME__));
+
 function stateFilterLabel(s: StateFilter): string {
   if (s === 'all') return 'Alle';
   if (s === 'active') return 'Aktive nå';
@@ -37,6 +44,7 @@ export function Sidebar(props: Props) {
     <aside className="sidebar">
       <div className="brand">
         <span className="brand-name">Stim</span>
+        <span className="side-build">Bygget {buildStamp}</span>
       </div>
 
       <nav className="side-section" aria-labelledby="side-clients">

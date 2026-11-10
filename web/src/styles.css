@@ -264,6 +264,13 @@ input[type='radio'] {
   margin: 8px 0 0 8px;
 }
 
+.side-build {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
 .inst-dot,
 .state-dot {
   flex: none;
@@ -704,19 +711,26 @@ input[type='radio'] {
 
 /* ---------- dialog ---------- */
 
+.modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgb(0 0 0 / 0.65);
+  overflow: auto;
+}
+
 .dialog {
-  width: min(540px, calc(100vw - 24px));
+  position: relative;
+  width: min(540px, 100%);
   max-height: calc(100dvh - 24px);
-  padding: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--bg);
   color: var(--ink);
   overflow: auto;
-}
-
-.dialog::backdrop {
-  background: rgb(0 0 0 / 0.65);
 }
 
 .dialog-body {
@@ -973,6 +987,11 @@ input[type='radio'] {
   .side-add {
     margin: 0;
     flex: none;
+  }
+
+  .side-build {
+    display: inline;
+    margin: 0 0 0 10px;
   }
 
   .toolbar {

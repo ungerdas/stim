@@ -221,6 +221,8 @@ export default function App() {
 
   // --- clients ----------------------------------------------------------
 
+  const closeDialog = useCallback(() => setDialog(null), []);
+
   const openEdit = async (id: string) => {
     try {
       const all = await api.instances();
@@ -381,7 +383,7 @@ export default function App() {
         <InstanceDialog
           kinds={kinds}
           existing={dialog.existing}
-          onClose={() => setDialog(null)}
+          onClose={closeDialog}
           onChanged={(text) => {
             setDialog(null);
             setNotice({ text });

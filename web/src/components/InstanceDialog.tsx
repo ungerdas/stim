@@ -24,7 +24,7 @@ interface FormState {
 }
 
 export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
-  const ref = useRef<HTMLDialogElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const [form, setForm] = useState<FormState>(() => ({
     kind: existing?.kind ?? kinds[0]?.kind ?? '',
     name: existing?.name ?? '',
@@ -40,9 +40,23 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Escape closes the form. When editing, nothing is auto-focused by the
+  // markup, so move focus into the form for keyboard users.
   useEffect(() => {
-    ref.current?.showModal();
-  }, []);
+    const onKey = (e: KeyboardEvent) => {
+      // Only a real key press aimed at the form (or at nothing in particular)
+      // closes it: Escape pressed inside an extension's own popup, or a
+      // synthetic key event dispatched by one, must not.
+      const target = e.target as Node | null;
+      const aimedHere = target === document.body || (target !== null && ref.current?.contains(target));
+      if (e.key === 'Escape' && e.isTrusted && !e.defaultPrevented && aimedHere) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    if (!ref.current?.contains(document.activeElement)) {
+      ref.current?.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
+    }
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const kind = kinds.find((k) => k.kind === form.kind);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -111,164 +125,167 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
   const advancedOpen = Boolean(existing?.basicUser || existing?.tlsSkipVerify);
 
   return (
-    <dialog
-      ref={ref}
-      className="dialog"
-      // Only the dialog's own close counts. Browser extensions (password
-      // managers in particular) inject elements into an open dialog, and a
-      // "close" event bubbling up from one of those must not close the form.
-      // For the same reason a click outside the form does not close it:
-      // closing is the × button, Escape, or a successful save.
-      onClose={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <form className="dialog-body" onSubmit={save}>
-        <h2 className="dialog-title">{existing ? `Endre ${existing.name}` : 'Legg til klient'}</h2>
+    // A plain layer, deliberately not a native modal <dialog>. showModal()
+    // makes everything outside the dialog inert and puts it in the browser's
+    // top layer, so anything a browser extension adds to the page while it is
+    // open (a password manager's paste prompt, say) ends up underneath it and
+    // cannot be clicked. Nothing closes the form except the × button, Escape,
+    // or a successful save.
+    <div className="modal-layer">
+      <div
+        ref={ref}
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="instance-dialog-title"
+      >
+        <form className="dialog-body" onSubmit={save}>
+          <h2 className="dialog-title" id="instance-dialog-title">{existing ? `Endre ${existing.name}` : 'Legg til klient'}</h2>
 
-        <fieldset className="kind-picker">
-          <legend className="field-label">Klienttype</legend>
-          <div className="kind-options">
-            {kinds.map((k) => (
-              <label key={k.kind} className="kind-option">
-                <input
-                  type="radio"
-                  name="kind"
-                  value={k.kind}
-                  checked={form.kind === k.kind}
-                  onChange={() => set('kind', k.kind)}
-                />
-                <span>{k.label}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+          <fieldset className="kind-picker">
+            <legend className="field-label">Klienttype</legend>
+            <div className="kind-options">
+              {kinds.map((k) => (
+                <label key={k.kind} className="kind-option">
+                  <input
+                    type="radio"
+                    name="kind"
+                    value={k.kind}
+                    checked={form.kind === k.kind}
+                    onChange={() => set('kind', k.kind)}
+                  />
+                  <span>{k.label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
 
-        <label className="field">
-          <span className="field-label">Navn</span>
-          <input
-            type="text"
-            value={form.name}
-            onChange={(e) => set('name', e.target.value)}
-            placeholder="F.eks. Seedboks Deluge"
-            required
-            autoFocus={!existing}
-          />
-        </label>
-
-        <label className="field">
-          <span className="field-label">Adresse til webgrensesnittet</span>
-          <input
-            type="url"
-            value={form.url}
-            onChange={(e) => set('url', e.target.value)}
-            placeholder={kind?.urlHint}
-            required
-            spellCheck={false}
-          />
-        </label>
-
-        <div className="field-row">
-          {kind?.needsUsername && (
-            <label className="field">
-              <span className="field-label">Brukernavn</span>
-              <input
-                type="text"
-                value={form.username}
-                onChange={(e) => set('username', e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-          )}
           <label className="field">
-            <span className="field-label">Passord</span>
+            <span className="field-label">Navn</span>
             <input
-              type="password"
-              value={form.password}
-              onChange={(e) => set('password', e.target.value)}
-              placeholder={existing?.hasPassword ? 'Uendret' : ''}
-              autoComplete="new-password"
+              type="text"
+              value={form.name}
+              onChange={(e) => set('name', e.target.value)}
+              placeholder="F.eks. Seedboks Deluge"
+              required
+              autoFocus={!existing}
             />
           </label>
-        </div>
 
-        <details className="advanced" open={advancedOpen}>
-          <summary>Bak revers proxy eller med selvsignert sertifikat</summary>
-          <p className="hint">
-            Fyll ut dette hvis nettleseren spør om brukernavn og passord før du i det hele tatt ser klienten, slik mange
-            seedbokser gjør.
-          </p>
+          <label className="field">
+            <span className="field-label">Adresse til webgrensesnittet</span>
+            <input
+              type="url"
+              value={form.url}
+              onChange={(e) => set('url', e.target.value)}
+              placeholder={kind?.urlHint}
+              required
+              spellCheck={false}
+            />
+          </label>
+
           <div className="field-row">
+            {kind?.needsUsername && (
+              <label className="field">
+                <span className="field-label">Brukernavn</span>
+                <input
+                  type="text"
+                  value={form.username}
+                  onChange={(e) => set('username', e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+            )}
             <label className="field">
-              <span className="field-label">HTTP-brukernavn</span>
-              <input
-                type="text"
-                value={form.basicUser}
-                onChange={(e) => set('basicUser', e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">HTTP-passord</span>
+              <span className="field-label">Passord</span>
               <input
                 type="password"
-                value={form.basicPass}
-                onChange={(e) => set('basicPass', e.target.value)}
-                placeholder={existing?.hasBasicPass ? 'Uendret' : ''}
+                value={form.password}
+                onChange={(e) => set('password', e.target.value)}
+                placeholder={existing?.hasPassword ? 'Uendret' : ''}
                 autoComplete="new-password"
               />
             </label>
           </div>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={form.tlsSkipVerify}
-              onChange={(e) => set('tlsSkipVerify', e.target.checked)}
-            />
-            <span>Godta selvsignert sertifikat</span>
-          </label>
-        </details>
 
-        <div className="dialog-status" aria-live="polite">
-          {test?.ok && (
-            <p className="status-ok">
-              Koblet til {kind?.label} {test.version}.
+          <details className="advanced" open={advancedOpen}>
+            <summary>Bak revers proxy eller med selvsignert sertifikat</summary>
+            <p className="hint">
+              Fyll ut dette hvis nettleseren spør om brukernavn og passord før du i det hele tatt ser klienten, slik mange
+              seedbokser gjør.
             </p>
-          )}
-          {test && !test.ok && (
-            <p className="status-bad">{connectionProblem(test.errorCode, kind?.label ?? '', test.error)}</p>
-          )}
-          {error && <p className="status-bad">{error}</p>}
-        </div>
+            <div className="field-row">
+              <label className="field">
+                <span className="field-label">HTTP-brukernavn</span>
+                <input
+                  type="text"
+                  value={form.basicUser}
+                  onChange={(e) => set('basicUser', e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">HTTP-passord</span>
+                <input
+                  type="password"
+                  value={form.basicPass}
+                  onChange={(e) => set('basicPass', e.target.value)}
+                  placeholder={existing?.hasBasicPass ? 'Uendret' : ''}
+                  autoComplete="new-password"
+                />
+              </label>
+            </div>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={form.tlsSkipVerify}
+                onChange={(e) => set('tlsSkipVerify', e.target.checked)}
+              />
+              <span>Godta selvsignert sertifikat</span>
+            </label>
+          </details>
 
-        <div className="dialog-actions">
-          {existing &&
-            (confirmDelete ? (
-              <button type="button" className="btn btn-danger" onClick={remove} disabled={busy !== null}>
-                Bekreft: fjern {existing.name}
-              </button>
-            ) : (
-              <button type="button" className="btn btn-quiet" onClick={() => setConfirmDelete(true)}>
-                Fjern klient
-              </button>
-            ))}
-          <span className="dialog-spacer" />
-          <button type="button" className="btn" onClick={runTest} disabled={busy !== null || !form.url}>
-            {busy === 'test' ? 'Tester …' : 'Test tilkobling'}
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={busy !== null}>
-            {existing ? 'Lagre klient' : 'Legg til klient'}
-          </button>
-        </div>
-        {existing && confirmDelete && (
-          <p className="hint">Dette fjerner bare klienten fra Stim. Torrentene i klienten blir ikke rørt.</p>
-        )}
-      </form>
-      <button type="button" className="dialog-close" onClick={() => ref.current?.close()} aria-label="Lukk">
-        ×
-      </button>
-    </dialog>
+          <div className="dialog-status" aria-live="polite">
+            {test?.ok && (
+              <p className="status-ok">
+                Koblet til {kind?.label} {test.version}.
+              </p>
+            )}
+            {test && !test.ok && (
+              <p className="status-bad">{connectionProblem(test.errorCode, kind?.label ?? '', test.error)}</p>
+            )}
+            {error && <p className="status-bad">{error}</p>}
+          </div>
+
+          <div className="dialog-actions">
+            {existing &&
+              (confirmDelete ? (
+                <button type="button" className="btn btn-danger" onClick={remove} disabled={busy !== null}>
+                  Bekreft: fjern {existing.name}
+                </button>
+              ) : (
+                <button type="button" className="btn btn-quiet" onClick={() => setConfirmDelete(true)}>
+                  Fjern klient
+                </button>
+              ))}
+            <span className="dialog-spacer" />
+            <button type="button" className="btn" onClick={runTest} disabled={busy !== null || !form.url}>
+              {busy === 'test' ? 'Tester …' : 'Test tilkobling'}
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy !== null}>
+              {existing ? 'Lagre klient' : 'Legg til klient'}
+            </button>
+          </div>
+          {existing && confirmDelete && (
+            <p className="hint">Dette fjerner bare klienten fra Stim. Torrentene i klienten blir ikke rørt.</p>
+          )}
+        </form>
+        <button type="button" className="dialog-close" onClick={onClose} aria-label="Lukk">
+          ×
+        </button>
+      </div>
+    </div>
   );
 }
