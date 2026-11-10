@@ -90,7 +90,7 @@ export function Sidebar(props: Props) {
             </li>
           ))}
         </ul>
-        <button type="button" className="btn btn-quiet side-add" onClick={props.onAdd}>
+        <button type="button" className="btn side-add" onClick={props.onAdd}>
           Legg til klient
         </button>
       </nav>

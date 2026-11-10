@@ -1,26 +1,27 @@
-/* Stim has one theme: dark. All colours are defined here. */
+/* Stim has one theme: black, with colour reserved for clients and torrent
+   states. All colours are defined here. */
 
 :root {
   color-scheme: dark;
 
-  --bg: #0f2730;
-  --side: #0b1f27;
-  --side-edge: #1f3f4a;
-  --tint: #17404d; /* hover and selection */
-  --line: #2b515d;
-  --ink: #e5eeeb;
-  --ink-soft: #9db3b8;
-  --mark: #f283c8; /* anything you can act on */
-  --mark-ink: #2a0a1e;
-  --raised: #163540;
+  --bg: #0a0a0a;
+  --side: #000000;
+  --side-edge: #1f1f1f;
+  --tint: #1c1c1c; /* hover and selection */
+  --line: #262626;
+  --ink: #ededed;
+  --ink-soft: #a1a1a1;
+  --mark: #fafafa; /* anything you can act on */
+  --mark-ink: #0a0a0a;
+  --raised: #141414;
 
   --downloading: #6db6e6;
   --seeding: #6fcba6;
-  --paused: #93a5ab;
+  --paused: #8c8c8c;
   --queued: #d8b95e;
   --checking: #b29cf0;
   --bad: #ff8f85;
-  --bad-wash: #3d1f1f;
+  --bad-wash: #2a1414;
 
   /* One colour per client, in the order they were added. */
   --inst-0: #6db6e6;
@@ -673,7 +674,7 @@ input[type='radio'] {
 }
 
 .dialog::backdrop {
-  background: rgb(8 24 30 / 0.55);
+  background: rgb(0 0 0 / 0.65);
 }
 
 .dialog-body {
