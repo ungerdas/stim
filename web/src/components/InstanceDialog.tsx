@@ -114,9 +114,13 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
     <dialog
       ref={ref}
       className="dialog"
-      onClose={onClose}
-      onClick={(e) => {
-        if (e.target === ref.current) ref.current?.close(); // click on the backdrop
+      // Only the dialog's own close counts. Browser extensions (password
+      // managers in particular) inject elements into an open dialog, and a
+      // "close" event bubbling up from one of those must not close the form.
+      // For the same reason a click outside the form does not close it:
+      // closing is the × button, Escape, or a successful save.
+      onClose={(e) => {
+        if (e.target === e.currentTarget) onClose();
       }}
     >
       <form className="dialog-body" onSubmit={save}>
