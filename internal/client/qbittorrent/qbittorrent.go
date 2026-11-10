@@ -201,6 +201,25 @@ type apiTorrent struct {
 	SavePath     string  `json:"save_path"`
 	AddedOn      int64   `json:"added_on"`
 	CompletionOn int64   `json:"completion_on"`
+	InfohashV1   string  `json:"infohash_v1"` // qBittorrent 4.4 and later
+	InfohashV2   string  `json:"infohash_v2"`
+}
+
+// altHash returns the torrent's other ID form, if it has one.
+func (t apiTorrent) altHash() string {
+	hash := strings.ToLower(t.Hash)
+	v1 := strings.ToLower(t.InfohashV1)
+	v2 := strings.ToLower(t.InfohashV2)
+	if len(v2) > 40 {
+		v2 = v2[:40]
+	}
+	switch {
+	case v1 != "" && v1 != hash:
+		return v1
+	case v2 != "" && v2 != hash:
+		return v2
+	}
+	return ""
 }
 
 // etaInfinity is the value qBittorrent reports when it has no estimate.
@@ -217,6 +236,7 @@ func (t apiTorrent) toTorrent() client.Torrent {
 	}
 	return client.Torrent{
 		Hash:         strings.ToLower(t.Hash),
+		AltHash:      t.altHash(),
 		Name:         t.Name,
 		State:        mapState(t.State),
 		RawState:     t.State,

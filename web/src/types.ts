@@ -16,6 +16,8 @@ export interface Capabilities {
 export interface Torrent {
   instanceId: string;
   hash: string;
+  /** The torrent's other ID form, for hybrid torrents (see the backend). */
+  altHash?: string;
   name: string;
   state: State;
   rawState: string;

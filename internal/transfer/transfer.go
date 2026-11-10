@@ -53,6 +53,9 @@ type Item struct {
 	// InTarget is true once the target client has taken the torrent over,
 	// even if a later step failed.
 	InTarget bool `json:"inTarget"`
+	// TargetHash is the torrent's ID in the target client, which can differ
+	// from Hash for hybrid torrents (see client.Torrent.AltHash).
+	TargetHash string `json:"targetHash,omitempty"`
 }
 
 // Job is one "move these torrents to that client" request.
@@ -263,6 +266,9 @@ func (e *Engine) Busy() map[string]bool {
 			if !it.State.finished() {
 				busy[it.SourceID+":"+it.Hash] = true
 				busy[j.TargetID+":"+it.Hash] = true
+				if it.TargetHash != "" {
+					busy[j.TargetID+":"+it.TargetHash] = true
+				}
 			}
 		}
 	}
@@ -346,6 +352,33 @@ func (e *Engine) sleep(ctx context.Context) error {
 	}
 }
 
+// lookupAny finds a torrent under any of the IDs it may have and returns
+// the one the client uses.
+func (e *Engine) lookupAny(ctx context.Context, c client.Transferer, hashes []string) (client.Torrent, string, bool, error) {
+	for _, h := range hashes {
+		t, found, err := e.lookupTorrent(ctx, c, h)
+		if err != nil {
+			return client.Torrent{}, "", false, err
+		}
+		if found {
+			return t, h, true, nil
+		}
+	}
+	return client.Torrent{}, "", false, nil
+}
+
+// candidates lists the IDs a torrent can have: the source's ID first, then
+// the v1 and truncated v2 hashes of its info dictionary.
+func candidates(hash string, tf *torrentfile.File) []string {
+	out := []string{hash}
+	for _, h := range tf.InfoHashes() {
+		if h != hash {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 func (e *Engine) lookupTorrent(ctx context.Context, c client.Transferer, hash string) (client.Torrent, bool, error) {
 	var (
 		t  client.Torrent
@@ -398,17 +431,22 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 	if t.SavePath == "" {
 		return fail(CodeOther, "the source client did not report where the files are")
 	}
-	if _, exists, err := e.lookupTorrent(ctx, dst, hash); err != nil {
-		return err
-	} else if exists {
-		return fail(CodeDuplicate, "the target client already has this torrent")
-	}
 
 	// 2. Get the .torrent file and make sure it is the right one.
 	e.setState(job, i, StateFetching)
 	data, err := e.torrentFile(ctx, srcClient, srcInst, hash)
 	if err != nil {
 		return err
+	}
+	tf, err := torrentfile.Parse(data)
+	if err != nil {
+		return fail(CodeWrongFile, "the torrent file could not be read: %v", err)
+	}
+	ids := candidates(hash, tf)
+	if _, _, exists, err := e.lookupAny(ctx, dst, ids); err != nil {
+		return err
+	} else if exists {
+		return fail(CodeDuplicate, "the target client already has this torrent")
 	}
 
 	// 3. Hand it to the target, stopped, pointing at the existing files.
@@ -420,9 +458,20 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 
 	// From here on the target has the torrent. Roll it back on any failure
 	// or cancellation, using a context that outlives the cancelled one.
+	// dstHash is the ID the target uses, once it is known.
+	dstHash := ""
 	rollback := func(cause error) error {
 		clean := context.WithoutCancel(ctx)
-		if err := e.call(clean, func(ctx context.Context) error { return dst.RemoveKeepData(ctx, hash) }); err != nil {
+		if dstHash == "" {
+			// It never showed up under any ID; look once more before giving up.
+			if _, h, found, err := e.lookupAny(clean, dst, ids); err == nil && found {
+				dstHash = h
+			}
+		}
+		if dstHash == "" {
+			return cause
+		}
+		if err := e.call(clean, func(ctx context.Context) error { return dst.RemoveKeepData(ctx, dstHash) }); err != nil {
 			e.update(job, i, func(it *Item) { it.InTarget = true })
 			return fmt.Errorf("%w (and the stopped copy could not be removed from the target client: %v)", cause, err)
 		}
@@ -431,7 +480,12 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 
 	// 4. Let the target hash the files, and require every piece.
 	e.setState(job, i, StateChecking)
-	checked, err := e.check(ctx, job, i, dst, hash)
+	dstHash, err = e.appear(ctx, dst, ids)
+	if err != nil {
+		return rollback(err)
+	}
+	e.update(job, i, func(it *Item) { it.TargetHash = dstHash })
+	checked, err := e.check(ctx, job, i, dst, dstHash)
 	if err != nil {
 		return rollback(err)
 	}
@@ -456,7 +510,7 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 	}
 
 	// 6. Start seeding from the target.
-	if err := e.call(steady, func(ctx context.Context) error { return dstClient.Resume(ctx, []string{hash}) }); err != nil && sourceErr == nil {
+	if err := e.call(steady, func(ctx context.Context) error { return dstClient.Resume(ctx, []string{dstHash}) }); err != nil && sourceErr == nil {
 		sourceErr = fmt.Errorf("the target client has taken over but could not be started: %w", err)
 	}
 	if sourceErr != nil {
@@ -466,7 +520,7 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 	// 7. Optionally let the target move the data to a new folder.
 	if job.NewPath != "" && !samePath(job.NewPath, t.SavePath) {
 		e.setState(job, i, StateMoving)
-		if err := e.relocate(steady, dst, hash, job.NewPath); err != nil {
+		if err := e.relocate(steady, dst, dstHash, job.NewPath); err != nil {
 			return fail(CodeMoveFailed, "the target client has taken over, but moving the files to %s failed: %v", job.NewPath, err)
 		}
 	}
@@ -539,25 +593,29 @@ func (e *Engine) torrentFile(ctx context.Context, srcClient client.Client, srcIn
 	return data, nil
 }
 
-// check starts a recheck in the target and waits for it to finish.
-func (e *Engine) check(ctx context.Context, job *Job, i int, dst client.Transferer, hash string) (client.Torrent, error) {
-	// A freshly added torrent can take a moment to show up.
+// appear waits for a freshly added torrent to show up in the target and
+// returns the ID the target gave it.
+func (e *Engine) appear(ctx context.Context, dst client.Transferer, ids []string) (string, error) {
 	deadline := time.Now().Add(e.timing.AppearWithin)
 	for {
-		_, found, err := e.lookupTorrent(ctx, dst, hash)
+		_, h, found, err := e.lookupAny(ctx, dst, ids)
 		if err != nil {
-			return client.Torrent{}, err
+			return "", err
 		}
 		if found {
-			break
+			return h, nil
 		}
 		if time.Now().After(deadline) {
-			return client.Torrent{}, errors.New("the torrent never appeared in the target client")
+			return "", errors.New("the torrent never appeared in the target client")
 		}
 		if err := e.sleep(ctx); err != nil {
-			return client.Torrent{}, err
+			return "", err
 		}
 	}
+}
+
+// check starts a recheck in the target and waits for it to finish.
+func (e *Engine) check(ctx context.Context, job *Job, i int, dst client.Transferer, hash string) (client.Torrent, error) {
 	if err := e.call(ctx, func(ctx context.Context) error { return dst.Recheck(ctx, hash) }); err != nil {
 		return client.Torrent{}, fmt.Errorf("the target client would not check the files: %w", err)
 	}

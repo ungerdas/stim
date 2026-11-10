@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { InstanceStatus, Torrent } from '../types';
 import { bytes, count } from '../format';
-import { torrentKey } from './TorrentTable';
+import { torrentKey } from '../duplicates';
 
 interface Props {
   /** The torrents to remove. */
@@ -50,21 +50,20 @@ export function DeleteDialog({ torrents, allTorrents, instances, colorOf, onClos
   }, [torrents]);
 
   // Torrents that are not being removed but use the same files: the same
-  // torrent in another client, or a cross-seed in the same folder.
+  // torrent in another client, or a cross-seed, in the same folder. (The
+  // same torrent in another folder has its own copy of the files.)
   const shared = useMemo(() => {
     const selected = new Set(torrents.map(torrentKey));
     const byPath = new Map<string, Torrent[]>();
-    const byHash = new Map<string, Torrent[]>();
     for (const t of allTorrents) {
       if (selected.has(torrentKey(t))) continue;
       const p = contentPath(t);
       byPath.set(p, [...(byPath.get(p) ?? []), t]);
-      byHash.set(t.hash, [...(byHash.get(t.hash) ?? []), t]);
     }
     const out: { torrent: Torrent; other: Torrent }[] = [];
     const seen = new Set<string>();
     for (const t of torrents) {
-      for (const other of [...(byPath.get(contentPath(t)) ?? []), ...(byHash.get(t.hash) ?? [])]) {
+      for (const other of byPath.get(contentPath(t)) ?? []) {
         const key = `${torrentKey(t)}>${torrentKey(other)}`;
         if (!seen.has(key)) {
           seen.add(key);
@@ -137,7 +136,9 @@ export function DeleteDialog({ torrents, allTorrents, instances, colorOf, onClos
                     <span className="ellipsis" title={other.name}>
                       {other.name}
                     </span>
-                    <span className="delete-count">i {nameOf(other.instanceId)}</span>
+                    <span className="delete-count">
+                      {other.tracker && <span className="delete-tracker">{other.tracker}</span>}i {nameOf(other.instanceId)}
+                    </span>
                   </li>
                 ))}
                 {shared.length > SHOW_SHARED && <li>og {count(shared.length - SHOW_SHARED)} til</li>}

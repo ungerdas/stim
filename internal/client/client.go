@@ -33,7 +33,11 @@ const (
 // Torrent is one torrent as reported by a client, in client-neutral form.
 // Sizes are bytes, rates are bytes per second, times are Unix seconds.
 type Torrent struct {
-	Hash         string   `json:"hash"`
+	Hash string `json:"hash"`
+	// AltHash is another ID the same torrent can have in other clients.
+	// Hybrid (v1+v2) torrents are identified by their truncated v2 hash in
+	// clients built on libtorrent 2 and by their v1 hash in older ones.
+	AltHash      string   `json:"altHash,omitempty"`
 	Name         string   `json:"name"`
 	State        State    `json:"state"`
 	RawState     string   `json:"rawState"`

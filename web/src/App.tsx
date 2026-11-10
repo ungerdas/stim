@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import type { InstanceConfig, InstanceStatus, KindInfo, Snapshot, State, Torrent, TransferJob } from './types';
+import type { InstanceConfig, InstanceStatus, KindInfo, Snapshot, Torrent, TransferJob } from './types';
 import { count, rate } from './format';
 import { connectionProblem } from './text';
 import { InstanceDialog } from './components/InstanceDialog';
@@ -9,12 +9,14 @@ import { StatsDialog } from './components/StatsDialog';
 import { DeleteDialog } from './components/DeleteDialog';
 import { TransferPanel } from './components/TransferPanel';
 import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
-import { TorrentTable, torrentKey, type Sort, type SortKey } from './components/TorrentTable';
+import { TorrentTable, type Sort, type SortKey } from './components/TorrentTable';
+import { findDuplicates, torrentKey } from './duplicates';
 
 const POLL_MS = 3000;
 const TRANSFER_POLL_MS = 1200;
 const DISMISSED_KEY = 'stim.dismissedTransfers';
 const HIDDEN_TRACKERS_KEY = 'stim.hiddenTrackers';
+const DISMISSED_DUPLICATES_KEY = 'stim.dismissedDuplicates';
 
 // Small per-browser settings. Storage can be unavailable or hold junk, so
 // both directions fail quietly.
@@ -61,6 +63,9 @@ export default function App() {
   // shown ones) means a tracker that appears later is shown, not silently
   // filtered out.
   const [hiddenTrackers, setHiddenTrackers] = useState<Set<string>>(() => loadSet(HIDDEN_TRACKERS_KEY));
+  // Duplicate groups the user has seen and dismissed; the notice comes back
+  // only for new ones.
+  const [dismissedDups, setDismissedDups] = useState<Set<string>>(() => loadSet(DISMISSED_DUPLICATES_KEY));
   const lastClicked = useRef<string | null>(null);
 
   // --- data -----------------------------------------------------------
@@ -131,6 +136,39 @@ export default function App() {
       saveSet(HIDDEN_TRACKERS_KEY, next);
       return next;
     });
+  const showDuplicates = () => {
+    setStateFilter('duplicates');
+    setInstanceFilter('all');
+    setQuery('');
+    setSort({ key: 'name', dir: 'asc' }); // keeps the copies of each torrent together
+  };
+  const dismissDuplicates = () =>
+    setDismissedDups(() => {
+      const next = new Set(dups.groups.keys());
+      saveSet(DISMISSED_DUPLICATES_KEY, next);
+      return next;
+    });
+  // Selects every copy outside the chosen client, for torrents that also
+  // have a copy in it, so they can be removed in one go.
+  const keepCopiesIn = (instanceId: string) => {
+    const shownKeys = new Set(visible.map(torrentKey));
+    const pick = new Set<string>();
+    for (const list of dups.groups.values()) {
+      if (!list.some((t) => t.instanceId === instanceId)) continue;
+      for (const t of list) {
+        const key = torrentKey(t);
+        if (t.instanceId !== instanceId && shownKeys.has(key)) pick.add(key);
+      }
+    }
+    setSelected(pick);
+    const name = instanceById.get(instanceId)?.status.name ?? '';
+    setNotice({
+      text:
+        pick.size === 0
+          ? `Ingen kopier å velge utenfor ${name}.`
+          : `Valgte ${count(pick.size)} ${pick.size === 1 ? 'kopi' : 'kopier'} utenfor ${name}. Trykk «Slett …» og velg «Fjern bare torrentene».`,
+    });
+  };
   const toggleTracker = (name: string) =>
     updateHiddenTrackers((prev) => {
       const next = new Set(prev);
@@ -168,6 +206,24 @@ export default function App() {
   }, [instances]);
   const colorOf = useCallback((id: string) => instanceById.get(id)?.color ?? 'var(--ink-soft)', [instanceById]);
   const instanceOf = useCallback((id: string) => instanceById.get(id)?.status, [instanceById]);
+
+  const dups = useMemo(() => findDuplicates(torrents), [torrents]);
+  const duplicateOf = useCallback(
+    (t: Torrent) => {
+      const info = dups.byKey.get(torrentKey(t));
+      if (!info) return undefined;
+      const names = info.otherInstanceIds.map((id) => instanceById.get(id)?.status.name ?? id);
+      return { clients: info.clients, others: names.join(', ') };
+    },
+    [dups, instanceById],
+  );
+  const newDupGroups = [...dups.groups.keys()].filter((g) => !dismissedDups.has(g)).length;
+  // Clients that hold a copy of some duplicated torrent.
+  const dupClientIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const list of dups.groups.values()) for (const t of list) ids.add(t.instanceId);
+    return instances.filter((i) => ids.has(i.id));
+  }, [instances, dups]);
 
   // A filter pointing at a removed client would show an empty list forever.
   useEffect(() => {
@@ -215,19 +271,23 @@ export default function App() {
       moving: 0,
       error: 0,
       unknown: 0,
+      duplicates: 0,
     } satisfies Record<StateFilter, number>;
     for (const t of inTracker) {
       counts[t.state]++;
       if (t.downloadRate > 0 || t.uploadRate > 0) counts.active++;
+      if (dups.byKey.has(torrentKey(t))) counts.duplicates++;
     }
     return counts;
-  }, [inTracker]);
+  }, [inTracker, dups]);
 
   const visible = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     const list = inTracker.filter((t) => {
       if (stateFilter === 'active') {
         if (t.downloadRate <= 0 && t.uploadRate <= 0) return false;
+      } else if (stateFilter === 'duplicates') {
+        if (!dups.byKey.has(torrentKey(t))) return false;
       } else if (stateFilter !== 'all' && t.state !== stateFilter) {
         return false;
       }
@@ -258,7 +318,7 @@ export default function App() {
           : va - vb;
       return cmp !== 0 ? cmp * dir : collator.compare(a.name, b.name) || a.hash.localeCompare(b.hash);
     });
-  }, [inTracker, stateFilter, query, sort, instanceById]);
+  }, [inTracker, stateFilter, query, sort, instanceById, dups]);
 
   const summary = useMemo(() => {
     let uploaded = 0;
@@ -375,7 +435,7 @@ export default function App() {
         onInstanceFilter={setInstanceFilter}
         stateFilter={stateFilter}
         stateCounts={stateCounts}
-        onStateFilter={(s: State | 'all' | 'active') => setStateFilter(s)}
+        onStateFilter={setStateFilter}
         onAdd={() => setDialog({ existing: null })}
         onEdit={openEdit}
         trackers={trackerCounts}
@@ -415,6 +475,27 @@ export default function App() {
             )}
           </p>
         ))}
+
+        {newDupGroups > 0 && stateFilter !== 'duplicates' && (
+          <div className="banner banner-warn" role="status">
+            <p>
+              <strong>
+                {dups.groups.size === 1
+                  ? 'En torrent seedes fra flere klienter samtidig.'
+                  : `${count(dups.groups.size)} torrenter seedes fra flere klienter samtidig.`}
+              </strong>{' '}
+              Samme torrent i to klienter melder seg på trackeren to ganger.
+            </p>
+            <div className="banner-actions">
+              <button type="button" className="btn btn-small" onClick={showDuplicates}>
+                Vis dem
+              </button>
+              <button type="button" className="btn btn-small btn-quiet" onClick={dismissDuplicates}>
+                Skjul
+              </button>
+            </div>
+          </div>
+        )}
 
         <TransferPanel
           jobs={visibleJobs}
@@ -491,6 +572,22 @@ export default function App() {
           </dl>
         </div>
 
+        {stateFilter === 'duplicates' && dupClientIds.length > 0 && (
+          <div className="dup-helper">
+            <span>Behold kopien i:</span>
+            {dupClientIds.map((inst) => (
+              <button key={inst.id} type="button" className="btn btn-small" onClick={() => keepCopiesIn(inst.id)}>
+                <span className="inst-dot" style={{ background: colorOf(inst.id) }} aria-hidden="true" />
+                {inst.name}
+              </button>
+            ))}
+            <span className="dup-helper-hint">
+              Velger kopiene i de andre klientene, så du kan fjerne dem med «Slett …». Ligger kopiene i samme mappe, deler
+              de filer: velg da «Fjern bare torrentene».
+            </span>
+          </div>
+        )}
+
         {snapshot === null && !loadError ? (
           <p className="empty">Henter torrenter …</p>
         ) : instances.length === 0 ? (
@@ -507,7 +604,11 @@ export default function App() {
               <p>Klientene har ingen torrenter ennå.</p>
             ) : (
               <>
-                <p>Ingen torrenter passer med søket og filtrene.</p>
+                <p>
+                  {stateFilter === 'duplicates' && !query
+                    ? 'Ingen torrenter seedes fra flere klienter.'
+                    : 'Ingen torrenter passer med søket og filtrene.'}
+                </p>
                 <button
                   type="button"
                   className="btn"
@@ -533,6 +634,7 @@ export default function App() {
             onToggleAll={onToggleAll}
             sort={sort}
             onSort={onSort}
+            duplicateOf={duplicateOf}
           />
         )}
       </main>

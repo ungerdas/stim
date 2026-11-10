@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { InstanceStatus, Torrent } from '../types';
 import { bytes, date, eta, percent, rate, ratio } from '../format';
 import { stateLabel } from '../text';
+import { torrentKey } from '../duplicates';
 
 export type SortKey =
   | 'name'
@@ -52,7 +53,7 @@ const ROW_HEIGHT = 34;
 const ROW_HEIGHT_COMPACT = 58;
 const COMPACT_BELOW = 764; // keep in step with the narrowest @container tier in styles.css
 
-export const torrentKey = (t: { instanceId: string; hash: string }) => `${t.instanceId}:${t.hash}`;
+export { torrentKey };
 
 interface Props {
   torrents: Torrent[];
@@ -63,6 +64,8 @@ interface Props {
   onToggleAll: () => void;
   sort: Sort;
   onSort: (key: SortKey) => void;
+  /** For torrents that are in more than one client: how many, and which others. */
+  duplicateOf: (t: Torrent) => { clients: number; others: string } | undefined;
 }
 
 export function TorrentTable(props: Props) {
@@ -134,6 +137,8 @@ export function TorrentTable(props: Props) {
           return (
             <Row
               key={key}
+              dupClients={props.duplicateOf(t)?.clients ?? 0}
+              dupOthers={props.duplicateOf(t)?.others ?? ''}
               torrent={t}
               rowKey={key}
               index={v.index}
@@ -161,9 +166,23 @@ interface RowProps {
   color: string;
   selected: boolean;
   onToggle: (key: string, range: boolean) => void;
+  dupClients: number;
+  dupOthers: string;
 }
 
-const Row = memo(function Row({ torrent: t, rowKey, index, top, height, instanceName, color, selected, onToggle }: RowProps) {
+const Row = memo(function Row({
+  torrent: t,
+  rowKey,
+  index,
+  top,
+  height,
+  instanceName,
+  color,
+  selected,
+  onToggle,
+  dupClients,
+  dupOthers,
+}: RowProps) {
   const done = t.progress >= 1;
   const remaining = done || t.state !== 'downloading' ? '' : eta(t.eta);
   const stateText = stateLabel[t.state];
@@ -193,8 +212,15 @@ const Row = memo(function Row({ torrent: t, rowKey, index, top, height, instance
         />
       </div>
       <div className="cell col-name" role="gridcell">
-        <span className="name" title={t.name}>
-          {t.name}
+        <span className="name-line">
+          <span className="name" title={t.name}>
+            {t.name}
+          </span>
+          {dupClients > 1 && (
+            <span className="dup-badge" title={`Seedes også fra ${dupOthers}`}>
+              {dupClients}×
+            </span>
+          )}
         </span>
         {/* Shown instead of the other columns when the table is narrow. */}
         <span className="name-meta">

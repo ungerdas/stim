@@ -24,6 +24,7 @@ Tidlig skjelett. Dette fungerer:
 - hvor mye som er lastet opp: for utvalget i sidemenyen, og per tracker og klient under «Se statistikk»
 - pause og gjenoppta, også på tvers av klienter i samme operasjon
 - slette torrenter, med eller uten filene, med varsel når andre torrenter bruker de samme filene
+- varsel om dobbeltseeding: samme torrent i flere klienter, med filter og hjelp til å fjerne kopiene
 - flytte torrenter mellom klienter på samme server, med valgfri flytting av filene til en ny mappe
 
 Dette mangler foreløpig: legge til og slette torrenter, detaljvisning (filer, trackere,
@@ -85,6 +86,19 @@ endres den senere, nekter Stim å koble til til du har godtatt den nye under End
 
 Stim leser bare `.torrent`-filer over SFTP, men SSH-innloggingen gir full tilgang til kontoen på serveren,
 og den lagres i klartekst i `config/instances.json`. Bruk gjerne en egen nøkkel kun for Stim.
+
+## Dobbeltseeding
+
+Ligger samme torrent i mer enn én klient, viser Stim et varsel, og torrentene får et «2×»-merke. Samme
+torrent i to klienter melder seg på trackeren to ganger. Cross-seeds (samme filer, men en annen torrent fra
+en annen tracker) telles ikke.
+
+**Vis dem** filtrerer listen til kopiene, sortert så de havner ved siden av hverandre. **Behold kopien i …**
+velger kopiene i de andre klientene, som du så fjerner med **Slett …**. Ligger kopiene i samme mappe, deler de
+filer: velg da «Fjern bare torrentene». **Skjul** fjerner varselet til det dukker opp nye.
+
+Hybride torrenter (v1+v2) kan ha ulik ID i ulike klienter (v1-hash i klienter på libtorrent 1.2, avkortet
+v2-hash på libtorrent 2). qBittorrent oppgir begge, og Stim bruker det til å kjenne dem igjen.
 
 ## Opplastet mengde
 

@@ -25,6 +25,7 @@ func testHash(t *testing.T) string {
 
 // fake is an in-memory client. dataFound is what a recheck finds.
 type fake struct {
+	idIndex   int // which of the file's info hashes this client uses as ID
 	mu        sync.Mutex
 	torrents  map[string]client.Torrent
 	dataFound float64
@@ -77,7 +78,7 @@ func (f *fake) AddStopped(_ context.Context, data []byte, opts client.AddOptions
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	h := tf.InfoHashes()[0]
+	h := tf.InfoHashes()[f.idIndex]
 	f.torrents[h] = client.Torrent{Hash: h, Name: "a.mkv", State: client.StatePaused, SavePath: opts.SavePath, Label: opts.Label}
 	return nil
 }
@@ -279,5 +280,46 @@ func TestBusyCoversRunningItems(t *testing.T) {
 	wait(t, e, job.ID)
 	if len(e.Busy()) != 0 {
 		t.Errorf("nothing should be busy after the job ended, got %v", e.Busy())
+	}
+}
+
+// A hybrid torrent is known by its v1 hash in one client and by its
+// truncated v2 hash in another; the move must still find and verify it.
+func TestTargetUsesOtherID(t *testing.T) {
+	e, src, dst, hash := setup(t)
+	dst.idIndex = 1
+	job, _ := e.Start(request(hash, true, ""))
+	it := wait(t, e, job.ID)
+	if it.State != StateDone {
+		t.Fatalf("got %+v", it)
+	}
+	tf, _ := torrentfile.Parse([]byte(fileData))
+	other := tf.InfoHashes()[1]
+	if it.TargetHash != other || !dst.has(other) || src.has(hash) {
+		t.Errorf("target hash %q, dst has %v, src has %v", it.TargetHash, dst.has(other), src.has(hash))
+	}
+
+	// A copy under the other ID counts as a duplicate.
+	e2, src2, dst2, _ := setup(t)
+	dst2.idIndex = 1
+	_ = dst2.AddStopped(context.Background(), []byte(fileData), client.AddOptions{SavePath: "/data"})
+	job, _ = e2.Start(request(hash, false, ""))
+	if it := wait(t, e2, job.ID); it.Code != CodeDuplicate {
+		t.Errorf("want a duplicate, got %+v", it)
+	}
+	_ = src2
+}
+
+// When the data is missing, the rollback must remove the copy under the ID
+// the target actually uses.
+func TestRollbackUsesTargetID(t *testing.T) {
+	e, src, dst, hash := setup(t)
+	dst.idIndex = 1
+	dst.dataFound = 0.2
+	job, _ := e.Start(request(hash, true, ""))
+	it := wait(t, e, job.ID)
+	tf, _ := torrentfile.Parse([]byte(fileData))
+	if it.Code != CodeDataNotFound || dst.has(tf.InfoHashes()[1]) || !src.has(hash) {
+		t.Errorf("got %+v; target still has copy: %v", it, dst.has(tf.InfoHashes()[1]))
 	}
 }

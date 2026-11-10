@@ -2,7 +2,7 @@ import type { InstanceStatus, KindInfo, State } from '../types';
 import { bytes, count, ratio } from '../format';
 import { instanceProblemShort, stateLabel } from '../text';
 
-export type StateFilter = State | 'all' | 'active';
+export type StateFilter = State | 'all' | 'active' | 'duplicates';
 
 interface Props {
   instances: InstanceStatus[];
@@ -36,6 +36,8 @@ export const trackerLabel = (name: string) => name || 'Uten tracker';
 
 // Always shown, then any other state that currently has torrents.
 const FIXED_STATES: StateFilter[] = ['all', 'active', 'downloading', 'seeding', 'paused', 'error'];
+// Only shown when there is something to show (or it is the current filter).
+const CONDITIONAL: StateFilter[] = ['duplicates'];
 const EXTRA_STATES: StateFilter[] = ['queued', 'checking', 'moving', 'unknown'];
 
 const buildStamp = new Intl.DateTimeFormat('nb-NO', {
@@ -48,13 +50,20 @@ const buildStamp = new Intl.DateTimeFormat('nb-NO', {
 function stateFilterLabel(s: StateFilter): string {
   if (s === 'all') return 'Alle';
   if (s === 'active') return 'Aktive nå';
+  if (s === 'duplicates') return 'Dobbelt seedet';
   return stateLabel[s];
 }
 
 export function Sidebar(props: Props) {
   const { instances, kinds, colorOf, stateCounts } = props;
   const kindLabel = (kind: string) => kinds.find((k) => k.kind === kind)?.label ?? kind;
-  const states = [...FIXED_STATES, ...EXTRA_STATES.filter((s) => stateCounts[s] > 0)];
+  const shown = (s: StateFilter) => stateCounts[s] > 0 || props.stateFilter === s;
+  const states = [
+    ...FIXED_STATES.slice(0, 2),
+    ...CONDITIONAL.filter(shown),
+    ...FIXED_STATES.slice(2),
+    ...EXTRA_STATES.filter(shown),
+  ];
 
   return (
     <aside className="sidebar">
@@ -147,7 +156,9 @@ export function Sidebar(props: Props) {
                 aria-current={props.stateFilter === s}
                 onClick={() => props.onStateFilter(s)}
               >
-                {s !== 'all' && s !== 'active' && <span className={`state-dot state-${s}`} aria-hidden="true" />}
+                {s !== 'all' && s !== 'active' && s !== 'duplicates' && (
+                  <span className={`state-dot state-${s}`} aria-hidden="true" />
+                )}
                 <span className="side-item-main">
                   <span className="side-item-name">{stateFilterLabel(s)}</span>
                 </span>
