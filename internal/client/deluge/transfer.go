@@ -16,6 +16,7 @@ import (
 var (
 	_ client.Transferer    = (*Client)(nil)
 	_ client.TrackerLister = (*Client)(nil)
+	_ client.Mover         = (*Client)(nil)
 )
 
 func (c *Client) Torrent(ctx context.Context, hash string) (client.Torrent, bool, error) {

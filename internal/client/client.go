@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/url"
 	"sort"
+
+	"github.com/ungerdas/stim/internal/remotefiles"
 )
 
 // Kind identifies a torrent client type, e.g. "qbittorrent" or "deluge".
@@ -75,6 +77,10 @@ type Config struct {
 	BasicUser     string // optional HTTP basic auth in front of the client
 	BasicPass     string
 	TLSSkipVerify bool
+	// SSH is access to the server the client runs on, when set up. Adapters
+	// use it for what the client's own API cannot do, such as deleting files
+	// for rTorrent behind ruTorrent.
+	SSH remotefiles.Config
 }
 
 // Client is the contract every adapter implements.
@@ -139,14 +145,30 @@ type Transferer interface {
 	// RemoveKeepData removes the torrent from the client and leaves every
 	// file on disk. There is deliberately no flag for deleting data here.
 	RemoveKeepData(ctx context.Context, hash string) error
-	// Move asks the client to move the torrent's data to path.
+}
+
+// Mover is implemented by adapters whose client can move a torrent's files
+// to another folder itself.
+type Mover interface {
 	Move(ctx context.Context, hash, path string) error
 }
 
 // Exporter is implemented by adapters that can hand out the original
-// .torrent file through the client's API.
+// .torrent file through the client's API. An adapter that only sometimes
+// can (rTorrent, depending on what sits in front of it) returns an error
+// wrapping ErrCannotExport when it cannot, so the caller can fall back to
+// reading the file over SSH.
 type Exporter interface {
 	ExportTorrent(ctx context.Context, hash string) ([]byte, error)
+}
+
+// ErrCannotExport means the client's API refused to hand out the file.
+var ErrCannotExport = errors.New("the client cannot export the torrent file")
+
+// TorrentFilePather is implemented by adapters that know where the client
+// keeps a torrent's .torrent file on its server, to read it over SSH.
+type TorrentFilePather interface {
+	TorrentFilePath(ctx context.Context, hash string) (string, error)
 }
 
 // TrackerLister returns a torrent's announce URLs. It is used to restore
@@ -163,11 +185,24 @@ type Info struct {
 	NeedsUsername bool         `json:"needsUsername"`
 	URLHint       string       `json:"urlHint"`
 	Capabilities  Capabilities `json:"capabilities"`
-	// ExportsTorrentFiles is true when the client's API can hand out
-	// .torrent files. Otherwise moving torrents away from it needs file
-	// access to TorrentDirHint on the server.
-	ExportsTorrentFiles bool   `json:"exportsTorrentFiles"`
-	TorrentDirHint      string `json:"torrentDirHint,omitempty"`
+	// ExportsTorrentFiles is true when the client's API can always hand out
+	// .torrent files.
+	ExportsTorrentFiles bool `json:"exportsTorrentFiles"`
+	// SSH says what SSH access to the client's server is for: "" not used,
+	// "required" to move torrents away from the client, "optional" as a
+	// fallback when the API refuses (rTorrent behind ruTorrent).
+	SSH string `json:"ssh"`
+	// TorrentDirHint is the usual folder of the .torrent files, for clients
+	// whose API does not say where a torrent's file is. Empty when it does.
+	TorrentDirHint string `json:"torrentDirHint,omitempty"`
+	// CanMoveFiles is true when the client can move a torrent's files.
+	CanMoveFiles bool `json:"canMoveFiles"`
+}
+
+// InfoFor returns the registered information for a client type.
+func InfoFor(kind Kind) (Info, bool) {
+	r, ok := registry[kind]
+	return r.info, ok
 }
 
 // Factory builds a Client for one instance.

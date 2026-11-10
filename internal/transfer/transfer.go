@@ -172,8 +172,14 @@ func samePath(a, b string) bool {
 
 // Start validates a request and begins working on it in the background.
 func (e *Engine) Start(req Request) (Job, error) {
-	if _, _, ok := e.clients.Lookup(req.TargetID); !ok {
+	target, _, ok := e.clients.Lookup(req.TargetID)
+	if !ok {
 		return Job{}, errors.New("unknown target client")
+	}
+	if strings.TrimSpace(req.NewPath) != "" {
+		if _, ok := target.(client.Mover); !ok {
+			return Job{}, errors.New("the target client cannot move files to another folder")
+		}
 	}
 	req.NewPath = strings.TrimSpace(req.NewPath)
 	if req.NewPath != "" {
@@ -527,39 +533,30 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 	return nil
 }
 
-// torrentFile fetches and verifies the .torrent for hash.
+// torrentFile fetches and verifies the .torrent for hash: through the
+// client's API where it can, otherwise over SSH from the client's server.
 func (e *Engine) torrentFile(ctx context.Context, srcClient client.Client, srcInst store.Instance, hash string) ([]byte, error) {
-	var data []byte
+	var (
+		data      []byte
+		exportErr error
+	)
 	if exp, ok := srcClient.(client.Exporter); ok {
 		err := e.call(ctx, func(ctx context.Context) error {
 			var err error
 			data, err = exp.ExportTorrent(ctx, hash)
 			return err
 		})
-		if err != nil {
+		switch {
+		case errors.Is(err, client.ErrCannotExport):
+			exportErr, data = err, nil
+		case err != nil:
 			return nil, err
 		}
-	} else {
-		cfg := srcInst.SSHConfig()
-		if !cfg.Configured() || strings.TrimSpace(srcInst.TorrentDir) == "" {
-			return nil, fail(CodeNeedsFiles, "this client cannot export torrent files; set up SSH access to its torrent folder")
-		}
-		var hostKey string
-		err := e.call(ctx, func(ctx context.Context) error {
-			var err error
-			data, hostKey, err = remotefiles.ReadFile(ctx, cfg, srcInst.TorrentDir, hash+".torrent")
-			return err
-		})
-		if hostKey != "" && cfg.HostKey == "" {
-			_ = e.hostKeys.SetHostKey(srcInst.ID, hostKey)
-		}
-		switch {
-		case errors.Is(err, remotefiles.ErrNotFound):
-			return nil, fail(CodeFileMissing, "%v", err)
-		case errors.Is(err, remotefiles.ErrHostKeyChanged):
-			return nil, fail(CodeHostKey, "%v", err)
-		case err != nil:
-			return nil, fail(CodeSSH, "%v", err)
+	}
+	if data == nil {
+		var err error
+		if data, err = e.readOverSSH(ctx, srcClient, srcInst, hash, exportErr); err != nil {
+			return nil, err
 		}
 	}
 
@@ -589,6 +586,54 @@ func (e *Engine) torrentFile(ctx context.Context, srcClient client.Client, srcIn
 			return nil, fail(CodeNoTrackers, "the torrent has no trackers in the source client")
 		}
 		data = tf.WithTrackers(urls)
+	}
+	return data, nil
+}
+
+// readOverSSH reads a torrent's .torrent file from the source client's
+// server. The path comes from the client when it knows it (Transmission,
+// rTorrent), otherwise from the torrent folder set on the instance.
+func (e *Engine) readOverSSH(ctx context.Context, srcClient client.Client, srcInst store.Instance, hash string, exportErr error) ([]byte, error) {
+	cfg := srcInst.SSHConfig()
+	dir, name := strings.TrimSpace(srcInst.TorrentDir), hash+".torrent"
+	if pather, ok := srcClient.(client.TorrentFilePather); ok {
+		var full string
+		err := e.call(ctx, func(ctx context.Context) error {
+			var err error
+			full, err = pather.TorrentFilePath(ctx, hash)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		dir, name = path.Dir(full), path.Base(full)
+	}
+	if !cfg.Configured() || dir == "" {
+		msg := "this client cannot export torrent files; set up SSH access to its server"
+		if exportErr != nil {
+			msg += " (" + exportErr.Error() + ")"
+		}
+		return nil, fail(CodeNeedsFiles, "%s", msg)
+	}
+	var (
+		data    []byte
+		hostKey string
+	)
+	err := e.call(ctx, func(ctx context.Context) error {
+		var err error
+		data, hostKey, err = remotefiles.ReadFile(ctx, cfg, dir, name)
+		return err
+	})
+	if hostKey != "" && cfg.HostKey == "" && err == nil {
+		_ = e.hostKeys.SetHostKey(srcInst.ID, hostKey)
+	}
+	switch {
+	case errors.Is(err, remotefiles.ErrNotFound):
+		return nil, fail(CodeFileMissing, "%v", err)
+	case errors.Is(err, remotefiles.ErrHostKeyChanged):
+		return nil, fail(CodeHostKey, "%v", err)
+	case err != nil:
+		return nil, fail(CodeSSH, "%v", err)
 	}
 	return data, nil
 }
@@ -662,7 +707,11 @@ func (e *Engine) check(ctx context.Context, job *Job, i int, dst client.Transfer
 
 // relocate asks the target to move the data and waits until it has.
 func (e *Engine) relocate(ctx context.Context, dst client.Transferer, hash, newPath string) error {
-	if err := e.call(ctx, func(ctx context.Context) error { return dst.Move(ctx, hash, newPath) }); err != nil {
+	mover, ok := dst.(client.Mover)
+	if !ok {
+		return errors.New("the target client cannot move files")
+	}
+	if err := e.call(ctx, func(ctx context.Context) error { return mover.Move(ctx, hash, newPath) }); err != nil {
 		return err
 	}
 	start := time.Now()

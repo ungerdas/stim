@@ -84,7 +84,9 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
 
   const kind = kinds.find((k) => k.kind === form.kind);
   // SSH access only matters for clients whose API cannot export torrents.
-  const showSSH = kind ? !kind.exportsTorrentFiles : false;
+  const showSSH = Boolean(kind?.ssh);
+  // Clients that say where each .torrent file is need no folder.
+  const needsDir = Boolean(kind?.torrentDirHint);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
     setTest(null);
@@ -108,7 +110,7 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
     sshUser: form.sshUser.trim(),
     sshPassword: form.sshPassword !== '' || !existing ? form.sshPassword : undefined,
     sshKey: form.sshKey.trim() !== '' || !existing ? form.sshKey : undefined,
-    torrentDir: form.torrentDir.trim(),
+    torrentDir: needsDir ? form.torrentDir.trim() : '',
     sshHostKey: pinKey?.key,
     forgetHostKey: pinKey?.replace,
   });
@@ -169,7 +171,9 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
     if (ssh.ok) {
       return (
         <p className="status-ok">
-          SSH: fant {ssh.torrents} torrentfiler i {form.torrentDir.trim()}.
+          {needsDir
+            ? `SSH: fant ${ssh.torrents} torrentfiler i ${form.torrentDir.trim()}.`
+            : 'SSH-tilkoblingen virker.'}
           {pinKey && !pinKey.replace && (
             <>
               {' '}
@@ -331,12 +335,23 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
 
           {showSSH && (
             <details className="advanced" open={Boolean(existing?.sshHost)}>
-              <summary>SSH-tilgang, for å flytte torrenter fra denne klienten</summary>
-              <p className="hint">
-                {kind?.label} kan ikke gi fra seg torrentfiler over webgrensesnittet. For å flytte torrenter herfra til
-                en annen klient henter Stim filene fra mappen på serveren over SFTP. Stim leser bare, og bare
-                .torrent-filer.
-              </p>
+              <summary>
+                {kind?.ssh === 'optional'
+                  ? 'SSH-tilgang, valgfritt'
+                  : 'SSH-tilgang, for å flytte torrenter fra denne klienten'}
+              </summary>
+              {kind?.ssh === 'optional' ? (
+                <p className="hint">
+                  Bak ruTorrent får ikke Stim hente torrentfiler eller slette filer gjennom {kind?.label}. Med SSH-tilgang
+                  gjør Stim det over SFTP i stedet: leser torrentfilen når du flytter en torrent herfra, og sletter
+                  filene når du velger «Slett torrenter og filer». Over en ren /RPC2-adresse trengs det ikke.
+                </p>
+              ) : (
+                <p className="hint">
+                  {kind?.label} kan ikke gi fra seg torrentfiler over webgrensesnittet. For å flytte torrenter herfra til
+                  en annen klient henter Stim filene fra serveren over SFTP. Stim leser bare, og bare .torrent-filer.
+                </p>
+              )}
               <div className="field-row">
                 <label className="field field-grow">
                   <span className="field-label">SSH-vert</span>
@@ -393,20 +408,22 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
                 />
                 <span className="hint">Nøkkelen kan ikke ha passordfrase.</span>
               </label>
-              <label className="field">
-                <span className="field-label">Mappen med torrentfilene</span>
-                <input
-                  type="text"
-                  value={form.torrentDir}
-                  onChange={(e) => set('torrentDir', e.target.value)}
-                  placeholder={kind?.torrentDirHint}
-                  spellCheck={false}
-                />
-                <span className="hint">
-                  Relativt til hjemmemappen, eller full sti. For {kind?.label} er det vanligvis {kind?.torrentDirHint}.
-                  Har du flere instanser på samme server, har hver sin mappe.
-                </span>
-              </label>
+              {needsDir && (
+                <label className="field">
+                  <span className="field-label">Mappen med torrentfilene</span>
+                  <input
+                    type="text"
+                    value={form.torrentDir}
+                    onChange={(e) => set('torrentDir', e.target.value)}
+                    placeholder={kind?.torrentDirHint}
+                    spellCheck={false}
+                  />
+                  <span className="hint">
+                    Relativt til hjemmemappen, eller full sti. For {kind?.label} er det vanligvis {kind?.torrentDirHint}.
+                    Har du flere instanser på samme server, har hver sin mappe.
+                  </span>
+                </label>
+              )}
               {storedFingerprint && !pinKey && <p className="hint">Lagret servernøkkel: {storedFingerprint}</p>}
               {pinKey?.replace && <p className="hint">Ny servernøkkel lagres når du lagrer: {pinKey.fingerprint}</p>}
             </details>

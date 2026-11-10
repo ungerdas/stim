@@ -53,7 +53,7 @@ export const transferStateLabel: Record<TransferState, string> = {
 };
 
 const transferProblems: Record<string, string> = {
-  'needs-file-access': 'Klienten kan ikke gi fra seg torrentfilen. Sett opp SSH-tilgang under Endre på kildeklienten.',
+  'needs-file-access': 'Klienten ga ikke fra seg torrentfilen. Sett opp SSH-tilgang under Endre på kildeklienten.',
   incomplete: 'Ikke ferdig nedlastet.',
   busy: 'Kildeklienten er opptatt med denne torrenten. Prøv igjen litt senere.',
   gone: 'Finnes ikke lenger i kildeklienten.',

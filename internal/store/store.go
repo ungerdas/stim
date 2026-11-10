@@ -62,6 +62,7 @@ func (i Instance) ClientConfig() client.Config {
 		BasicUser:     i.BasicUser,
 		BasicPass:     i.BasicPass,
 		TLSSkipVerify: i.TLSSkipVerify,
+		SSH:           i.SSHConfig(),
 	}
 }
 

@@ -26,6 +26,7 @@ func init() {
 		Capabilities:  caps,
 
 		ExportsTorrentFiles: true,
+		CanMoveFiles:        true,
 	}, New)
 }
 

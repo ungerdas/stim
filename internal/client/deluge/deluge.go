@@ -33,7 +33,9 @@ func init() {
 		// Deluge has no API call that returns a .torrent file; they live in
 		// the daemon's state folder.
 		ExportsTorrentFiles: false,
+		SSH:                 "required",
 		TorrentDirHint:      ".config/deluge/state",
+		CanMoveFiles:        true,
 	}, New)
 }
 

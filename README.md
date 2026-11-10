@@ -10,9 +10,11 @@ over klientens eget API.
 | --- | --- | --- |
 | qBittorrent | 4.6.7 og 5.3.0 | WebUI-API-et (`/api/v2`) |
 | Deluge | 2.2.0 | JSON-RPC i webgrensesnittet (`/json`) |
+| Transmission | 4.0.5 | RPC (`/transmission/rpc`) |
+| rTorrent | 0.9.8, direkte og bak ruTorrent | XML-RPC (`/RPC2`, eller ruTorrents httprpc-plugin) |
 
-rTorrent og Transmission er planlagt. Adapterlaget er laget for at nye klienter kan
-legges til uten å røre resten av koden, se [Legge til en ny klienttype](#legge-til-en-ny-klienttype).
+Adapterlaget er laget for at nye klienter kan legges til uten å røre resten av koden, se
+[Legge til en ny klienttype](#legge-til-en-ny-klienttype).
 
 ## Status
 
@@ -50,8 +52,15 @@ docker compose up -d --build
 - **Deluge:** adressen til webgrensesnittet, f.eks. `http://192.168.1.10:8112`, pluss passordet til
   webgrensesnittet. Stim kobler webgrensesnittet til første daemon i Connection Manager hvis det
   ikke allerede er tilkoblet.
+- **Transmission:** adressen til serveren, f.eks. `http://192.168.1.10:9091`, pluss brukernavn og passord
+  fra `rpc-username`/`rpc-password` hvis innlogging er slått på. Adressen til webgrensesnittet
+  (`…/transmission/web/`) eller RPC-adressen virker også.
+- **rTorrent:** adressen til ruTorrent (f.eks. `https://server/brukernavn/rutorrent`), og Stim bruker
+  ruTorrents httprpc-plugin. Eller en XML-RPC-adresse rett mot rTorrent (`…/RPC2`). Brukernavn og passord er
+  innloggingen i nettleseren foran ruTorrent, hvis det er en.
 - **Seedboks bak HTTP-innlogging** (nettleseren spør om brukernavn/passord før du ser klienten):
-  fyll ut HTTP-brukernavn og -passord under «Bak revers proxy eller med selvsignert sertifikat».
+  for qBittorrent og Deluge fyller du det ut under «Bak revers proxy eller med selvsignert sertifikat». For
+  Transmission og rTorrent er det selve brukernavnet og passordet.
 
 ## Flytte torrenter mellom klienter
 
@@ -70,6 +79,27 @@ hoppes over.
 Begge klientene må se filene på **samme sti**. Det gjelder for klienter som kjører som samme bruker på
 samme server, slik som på en seedboks. Kjører en av dem i Docker med andre mount-punkter, vil sjekken i
 steg 3 feile, og ingenting blir endret.
+
+### SSH-tilgang
+
+| Klient | Trenger SSH for | Hvor Stim leser torrentfilen |
+| --- | --- | --- |
+| qBittorrent | ingenting | gjennom API-et |
+| Deluge | å flytte torrenter herfra | mappen du oppgir, vanligvis `.config/deluge/state` |
+| Transmission | å flytte torrenter herfra | stien Transmission selv oppgir |
+| rTorrent | bak ruTorrent: å flytte herfra og å slette filer | rTorrents session-mappe |
+
+Over en ren `/RPC2`-adresse henter Stim torrentfilen og sletter filer gjennom rTorrent selv. Nyere ruTorrent
+stopper kommandoene som trengs for det, og da bruker Stim SSH. Uten SSH nekter Stim å slette filene og lar
+torrenten ligge (stoppet), i stedet for å fjerne den og etterlate filene. Sletting over SSH krever at
+serverens nøkkel er lagret, altså at du har trykket «Test tilkobling» og lagret klienten.
+
+rTorrent kan ikke flytte filer selv, så «Flytt filene til en annen mappe» er ikke tilgjengelig med rTorrent
+som mål. Flytting til rTorrent bak ruTorrent krever at mappen ligger innenfor ruTorrents `$topDirectory`;
+ellers dropper ruTorrent mappen, rTorrent finner ikke filene, og Stim ruller flyttingen tilbake.
+
+Kjører klienten i Docker, oppgir Transmission og rTorrent stier slik containeren ser dem. Da må SSH-brukeren se
+de samme stiene, ellers finner ikke Stim torrentfilen.
 
 ### Fra Deluge: SSH-tilgang
 
@@ -157,9 +187,9 @@ web/                      React + Vite + TypeScript
 ### Legge til en ny klienttype
 
 1. Lag en pakke under `internal/client/<navn>/` som implementerer `client.Client`
-   (`Version`, `Torrents`, `Pause`, `Resume`) og oversetter klientens tilstander til `client.State`.
-   For flytting implementerer den også `client.Transferer`, og `client.Exporter` hvis API-et kan gi fra
-   seg `.torrent`-filer.
+   (`Version`, `Torrents`, `Pause`, `Resume`, `Remove`) og oversetter klientens tilstander til
+   `client.State`. For flytting implementerer den også `client.Transferer`, `client.Mover` hvis klienten kan
+   flytte filer, og `client.Exporter` og/eller `client.TorrentFilePather` for å få tak i `.torrent`-filen.
 2. Registrer den i pakkens `init()` med `client.Register(...)`. `client.Info` forteller
    webgrensesnittet hva skjemaet skal vise (trengs brukernavn, eksempel-URL, støtte for etiketter/tagger).
 3. Importer pakken i `cmd/stim/main.go`.
@@ -194,3 +224,6 @@ Webgrensesnittet henter klienttypene fra `/api/kinds` og trenger ingen endringer
 - Trackere vises som nettstedets domene (`tracker.example.org` blir `example.org`), slik at samme
   tracker grupperes likt fra qBittorrent og Deluge. Har en torrent flere trackere, vises én av dem.
 - Deluge 1.x er forsøkt støttet (egne metodenavn for pause/gjenoppta), men ikke testet.
+- rTorrent fører ingen totalsum over tid, bare siden omstart. «Lagt til» er tidspunktet ruTorrent registrerte,
+  eller når rTorrent lastet torrenten.
+- Transmission-etiketter vises som tagger, siden en torrent kan ha flere.

@@ -18,6 +18,7 @@ import (
 var (
 	_ client.Transferer = (*Client)(nil)
 	_ client.Exporter   = (*Client)(nil)
+	_ client.Mover      = (*Client)(nil)
 )
 
 // post sends a form and requires HTTP 200.

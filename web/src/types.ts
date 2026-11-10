@@ -77,7 +77,12 @@ export interface KindInfo {
   capabilities: Capabilities;
   /** False when moving torrents away from this client needs SSH access. */
   exportsTorrentFiles: boolean;
+  /** What SSH access is for: '' nothing, 'required' to move torrents away, 'optional' as a fallback. */
+  ssh: '' | 'required' | 'optional';
+  /** Usual folder of the .torrent files; empty when the client says where each one is. */
   torrentDirHint?: string;
+  /** Whether the client can move a torrent's files itself. */
+  canMoveFiles: boolean;
 }
 
 /** An instance's saved settings. Passwords never leave the server. */

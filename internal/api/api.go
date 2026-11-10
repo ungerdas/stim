@@ -335,10 +335,15 @@ func testSSH(r *http.Request, in store.Instance) map[string]any {
 	if !cfg.Configured() {
 		return map[string]any{"ok": false, "error": "SSH needs a user name and a password or key"}
 	}
-	if in.TorrentDir == "" {
+	// Clients that say where each .torrent file is need no folder; for them
+	// the test only checks that logging in and listing the home folder work.
+	dir := in.TorrentDir
+	if info, ok := client.InfoFor(in.Kind); ok && info.TorrentDirHint == "" {
+		dir = "."
+	} else if dir == "" {
 		return map[string]any{"ok": false, "error": "the torrent folder is not filled in"}
 	}
-	count, hostKey, err := remotefiles.Probe(r.Context(), cfg, in.TorrentDir)
+	count, hostKey, err := remotefiles.Probe(r.Context(), cfg, dir)
 	res := map[string]any{"ok": err == nil, "torrents": count}
 	if hostKey != "" {
 		res["hostKey"] = hostKey

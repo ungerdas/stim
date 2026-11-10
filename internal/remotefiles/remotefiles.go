@@ -213,3 +213,31 @@ func Probe(ctx context.Context, cfg Config, dir string) (torrents int, hostKey s
 	}
 	return torrents, s.hostKey, nil
 }
+
+// RemoveAll deletes a file or folder and everything in it. Because it
+// destroys data it never trusts a server on first contact: the host key
+// must already be stored. It also refuses paths that are relative, not
+// clean, or too close to the root to be a single download.
+func RemoveAll(ctx context.Context, cfg Config, p string) error {
+	if cfg.HostKey == "" {
+		return errors.New("the server's SSH key is not stored yet; test the SSH connection under the client's settings and save")
+	}
+	if !path.IsAbs(p) || path.Clean(p) != p || strings.Count(p, "/") < 2 {
+		return fmt.Errorf("refusing to delete %q", p)
+	}
+	s, _, err := open(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	if _, err := s.sftp.Lstat(p); err != nil {
+		if errors.Is(err, sftp.ErrSSHFxNoSuchFile) || strings.Contains(err.Error(), "not exist") {
+			return nil // already gone
+		}
+		return fmt.Errorf("could not look at %s: %w", p, err)
+	}
+	if err := s.sftp.RemoveAll(p); err != nil {
+		return fmt.Errorf("could not delete %s: %w", p, err)
+	}
+	return nil
+}

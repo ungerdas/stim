@@ -21,6 +21,8 @@ import (
 	// Client adapters register themselves on import. Add new ones here.
 	_ "github.com/ungerdas/stim/internal/client/deluge"
 	_ "github.com/ungerdas/stim/internal/client/qbittorrent"
+	_ "github.com/ungerdas/stim/internal/client/rtorrent"
+	_ "github.com/ungerdas/stim/internal/client/transmission"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".

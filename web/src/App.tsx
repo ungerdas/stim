@@ -593,7 +593,8 @@ export default function App() {
         ) : instances.length === 0 ? (
           <div className="empty">
             <h1 className="empty-title">Ingen klienter ennå</h1>
-            <p>Legg til en qBittorrent- eller Deluge-instans, så samler Stim torrentene dine i én liste.</p>
+            <p>Legg til en qBittorrent-, Deluge-, Transmission- eller rTorrent-instans, så samler Stim torrentene dine i
+              én liste.</p>
             <button type="button" className="btn btn-primary" onClick={() => setDialog({ existing: null })}>
               Legg til klient
             </button>

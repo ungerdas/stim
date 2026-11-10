@@ -170,3 +170,46 @@ func TestPrivateKeyAuth(t *testing.T) {
 		t.Errorf("key auth: %q, %v", data, err)
 	}
 }
+
+func TestRemoveAll(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "Some.Release")
+	if err := os.MkdirAll(filepath.Join(target, "Subs"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(target, "a.mkv"), []byte("x"), 0o600)
+	_ = os.WriteFile(filepath.Join(target, "Subs", "a.srt"), []byte("x"), 0o600)
+	keep := filepath.Join(dir, "Other.Release.mkv")
+	_ = os.WriteFile(keep, []byte("x"), 0o600)
+
+	addr, _ := serve(t, nil)
+	host, port := split(t, addr)
+	cfg := Config{Host: host, Port: port, User: "u", Password: "pw"}
+	ctx := context.Background()
+
+	if err := RemoveAll(ctx, cfg, target); err == nil {
+		t.Fatal("deleting without a stored host key must be refused")
+	}
+	_, seen, err := Probe(ctx, cfg, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.HostKey = seen
+	for _, bad := range []string{"relative/path", "/", "/tmp", target + "/", target + "/../x"} {
+		if err := RemoveAll(ctx, cfg, bad); err == nil {
+			t.Errorf("RemoveAll(%q) should be refused", bad)
+		}
+	}
+	if err := RemoveAll(ctx, cfg, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Error("the folder should be gone")
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Error("a neighbouring file must stay")
+	}
+	if err := RemoveAll(ctx, cfg, target); err != nil {
+		t.Errorf("deleting something already gone should succeed, got %v", err)
+	}
+}

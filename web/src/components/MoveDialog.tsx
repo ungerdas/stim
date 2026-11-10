@@ -54,7 +54,8 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
       const inst = instances.find((i) => i.id === id);
       const kind = inst && kindOf(inst.kind);
       const cfg = configs?.find((c) => c.id === id);
-      return kind && !kind.exportsTorrentFiles && !(cfg?.sshHost && cfg.torrentDir);
+      const sshReady = Boolean(cfg?.sshHost && (cfg.torrentDir || !kind?.torrentDirHint));
+      return kind?.ssh === 'required' && !sshReady;
     });
     const paths = [...new Set(movable.map((t) => t.savePath))];
     return { onTarget, incomplete, movable, sourceIds, needsSSH, paths };
@@ -88,6 +89,9 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
   };
 
   const verb = removeFromSource ? 'Flytt' : 'Kopier';
+  const targetInst = instances.find((i) => i.id === targetId);
+  const targetKind = targetInst && kinds.find((k) => k.kind === targetInst.kind);
+  const targetCanMove = !targetKind || targetKind.canMoveFiles;
 
   return (
     <div className="modal-layer">
@@ -115,7 +119,10 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
                       value={inst.id}
                       checked={targetId === inst.id}
                       disabled={only || !inst.online}
-                      onChange={() => setTargetId(inst.id)}
+                      onChange={() => {
+                        setTargetId(inst.id);
+                        if (!kinds.find((k) => k.kind === inst.kind)?.canMoveFiles) setMoveFiles(false);
+                      }}
                     />
                     <span className="inst-dot" style={{ background: colorOf(inst.id) }} aria-hidden="true" />
                     <span className="target-name">{inst.name}</span>
@@ -177,11 +184,12 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
             <input
               type="checkbox"
               checked={moveFiles}
-              disabled={!removeFromSource}
+              disabled={!removeFromSource || !targetCanMove}
               onChange={(e) => setMoveFiles(e.target.checked)}
             />
             <span>Flytt filene til en annen mappe</span>
           </label>
+          {!targetCanMove && <p className="hint">{targetKind?.label} kan ikke flytte filer selv.</p>}
           {moveFiles && (
             <label className="field">
               <span className="field-label">Ny mappe, slik målklienten ser den</span>
