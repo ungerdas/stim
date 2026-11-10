@@ -21,7 +21,6 @@ Tidlig skjelett. Dette fungerer:
 - legge til, endre og fjerne klienter, med tilkoblingstest
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
 - pause og gjenoppta, også på tvers av klienter i samme operasjon
-- «stimen» øverst: én fisk per torrent som overfører data akkurat nå
 
 Dette mangler foreløpig: legge til og slette torrenter, detaljvisning (filer, trackere,
 peers), endre etikett/kategori, og **innlogging**.

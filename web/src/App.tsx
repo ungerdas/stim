@@ -3,9 +3,7 @@ import { api } from './api';
 import type { InstanceConfig, InstanceStatus, KindInfo, Snapshot, State, Torrent } from './types';
 import { count, rate } from './format';
 import { connectionProblem } from './text';
-import { FishGlyph } from './components/Fish';
 import { InstanceDialog } from './components/InstanceDialog';
-import { Shoal } from './components/Shoal';
 import { Sidebar, type StateFilter } from './components/Sidebar';
 import { TorrentTable, torrentKey, type Sort, type SortKey } from './components/TorrentTable';
 
@@ -256,34 +254,6 @@ export default function App() {
       />
 
       <main className="main">
-        <header className="topbar">
-          <Shoal
-            torrents={torrents}
-            colorOf={colorOf}
-            onPick={(t) => {
-              setInstanceFilter('all');
-              setStateFilter('all');
-              setQuery(t.name);
-            }}
-          />
-          <dl className="totals">
-            <div className="total">
-              <dt>
-                <FishGlyph hollow />
-                Ned
-              </dt>
-              <dd>{rate(totalDown) || '0 B/s'}</dd>
-            </div>
-            <div className="total">
-              <dt>
-                <FishGlyph />
-                Opp
-              </dt>
-              <dd>{rate(totalUp) || '0 B/s'}</dd>
-            </div>
-          </dl>
-        </header>
-
         {loadError && (
           <p className="banner banner-bad" role="alert">
             Får ikke kontakt med Stim-serveren ({loadError}). Prøver igjen om noen sekunder.
@@ -346,6 +316,20 @@ export default function App() {
                 ? `${count(visible.length)} av ${count(torrents.length)} torrenter`
                 : `${count(torrents.length)} torrenter`}
           </p>
+          <dl className="totals">
+            <div className="total">
+              <dt>
+                <span aria-hidden="true">↓</span> Ned
+              </dt>
+              <dd>{rate(totalDown) || '0 B/s'}</dd>
+            </div>
+            <div className="total">
+              <dt>
+                <span aria-hidden="true">↑</span> Opp
+              </dt>
+              <dd>{rate(totalUp) || '0 B/s'}</dd>
+            </div>
+          </dl>
         </div>
 
         {snapshot === null && !loadError ? (
