@@ -12,6 +12,7 @@ export type SortKey =
   | 'size'
   | 'downloadRate'
   | 'uploadRate'
+  | 'uploaded'
   | 'ratio'
   | 'eta'
   | 'label'
@@ -38,6 +39,7 @@ const COLUMNS: Column[] = [
   { key: 'size', title: 'Størrelse', className: 'col-size', numeric: true },
   { key: 'downloadRate', title: 'Ned', className: 'col-down', numeric: true },
   { key: 'uploadRate', title: 'Opp', className: 'col-up', numeric: true },
+  { key: 'uploaded', title: 'Lastet opp', className: 'col-uploaded', numeric: true },
   { key: 'ratio', title: 'Ratio', className: 'col-ratio', numeric: true },
   { key: 'eta', title: 'Gjenstår', className: 'col-eta', numeric: true },
   { key: 'label', title: 'Etikett', className: 'col-label' },
@@ -226,6 +228,9 @@ const Row = memo(function Row({ torrent: t, rowKey, index, top, height, instance
       </div>
       <div className="cell col-up is-numeric" role="gridcell">
         {rate(t.uploadRate)}
+      </div>
+      <div className="cell col-uploaded is-numeric" role="gridcell">
+        {bytes(t.uploaded)}
       </div>
       <div className="cell col-ratio is-numeric" role="gridcell">
         {ratio(t.ratio)}

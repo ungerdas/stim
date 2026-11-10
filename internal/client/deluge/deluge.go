@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ungerdas/stim/internal/client"
 )
@@ -50,6 +51,14 @@ type Client struct {
 	mu sync.Mutex
 	// Deluge 1.x names the pause/resume calls in the singular.
 	legacyPause *bool
+
+	totalsMu   sync.Mutex
+	totals     client.Totals
+	haveTotals bool
+	// Whether the Stats plugin answered last time, and when that was
+	// checked, so a missing plugin is not asked for on every poll.
+	statsPlugin        bool
+	statsPluginChecked time.Time
 }
 
 // New builds a Deluge client.
@@ -270,6 +279,7 @@ func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
 	if err := json.Unmarshal(res, &raw); err != nil {
 		return nil, errNotDeluge
 	}
+	c.updateTotals(ctx)
 	out := make([]client.Torrent, 0, len(raw))
 	for hash, t := range raw {
 		out = append(out, t.toTorrent(hash))
@@ -386,4 +396,54 @@ func (c *Client) setRunning(ctx context.Context, hashes []string, verb string) e
 	}
 	remember(true)
 	return nil
+}
+
+// statsRecheck is how often a missing Stats plugin is looked for again.
+const statsRecheck = 5 * time.Minute
+
+// updateTotals refreshes the client-wide totals. It runs right after a
+// successful call, so the session is valid and the plain rawCall is enough;
+// failures only leave the numbers unknown.
+func (c *Client) updateTotals(ctx context.Context) {
+	totals := client.UnknownTotals
+
+	var session struct {
+		Upload   float64 `json:"total_upload"`
+		Download float64 `json:"total_download"`
+	}
+	if res, err := c.rawCall(ctx, "core.get_session_status", []string{"total_upload", "total_download"}); err == nil &&
+		json.Unmarshal(res, &session) == nil {
+		totals.SessionUpload, totals.SessionDownload = int64(session.Upload), int64(session.Download)
+	}
+
+	c.totalsMu.Lock()
+	tryPlugin := c.statsPlugin || time.Since(c.statsPluginChecked) > statsRecheck
+	c.totalsMu.Unlock()
+	if tryPlugin {
+		// The Stats plugin keeps totals across restarts, counted from when
+		// it was enabled.
+		res, err := c.rawCall(ctx, "stats.get_totals")
+		var all struct {
+			Upload   *float64 `json:"total_upload"`
+			Download *float64 `json:"total_download"`
+		}
+		ok := err == nil && json.Unmarshal(res, &all) == nil && all.Upload != nil && all.Download != nil
+		if ok {
+			totals.AllTimeUpload, totals.AllTimeDownload = int64(*all.Upload), int64(*all.Download)
+		}
+		c.totalsMu.Lock()
+		c.statsPlugin, c.statsPluginChecked = ok, time.Now()
+		c.totalsMu.Unlock()
+	}
+
+	c.totalsMu.Lock()
+	c.totals, c.haveTotals = totals, true
+	c.totalsMu.Unlock()
+}
+
+// Totals returns the totals seen during the last Torrents call.
+func (c *Client) Totals() (client.Totals, bool) {
+	c.totalsMu.Lock()
+	defer c.totalsMu.Unlock()
+	return c.totals, c.haveTotals
 }

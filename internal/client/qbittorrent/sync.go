@@ -21,15 +21,20 @@ type syncTorrent struct {
 }
 
 type syncState struct {
-	rid      int64
-	torrents map[string]*syncTorrent
-	trackers map[string][]string // announce URL → hashes of the torrents using it
+	rid         int64
+	torrents    map[string]*syncTorrent
+	trackers    map[string][]string        // announce URL → hashes of the torrents using it
+	serverState map[string]json.RawMessage // client-wide numbers, also sent as changes only
+	totals      client.Totals
+	haveTotals  bool
 }
 
 func (s *syncState) reset() {
 	s.rid = 0
 	s.torrents = map[string]*syncTorrent{}
 	s.trackers = map[string][]string{}
+	s.serverState = map[string]json.RawMessage{}
+	s.haveTotals = false
 }
 
 type mainData struct {
@@ -39,6 +44,7 @@ type mainData struct {
 	TorrentsRemoved []string                              `json:"torrents_removed"`
 	Trackers        map[string][]string                   `json:"trackers"`
 	TrackersRemoved []string                              `json:"trackers_removed"`
+	ServerState     map[string]json.RawMessage            `json:"server_state"`
 }
 
 // Torrents returns every torrent, using incremental sync.
@@ -103,8 +109,44 @@ func (s *syncState) apply(md mainData) error {
 	for u, hashes := range md.Trackers {
 		s.trackers[u] = hashes
 	}
+	for k, v := range md.ServerState {
+		s.serverState[k] = v
+	}
+	s.totals = client.Totals{
+		AllTimeUpload:   s.number("alltime_ul"),
+		AllTimeDownload: s.number("alltime_dl"),
+		SessionUpload:   s.number("up_info_data"),
+		SessionDownload: s.number("dl_info_data"),
+	}
+	s.haveTotals = true
 	s.rid = md.Rid
 	return nil
+}
+
+// number reads an integer from server_state, or -1 when it is missing.
+func (s *syncState) number(key string) int64 {
+	raw, ok := s.serverState[key]
+	if !ok {
+		return -1
+	}
+	var n json.Number
+	if json.Unmarshal(raw, &n) != nil {
+		return -1
+	}
+	if v, err := n.Int64(); err == nil {
+		return v
+	}
+	if f, err := n.Float64(); err == nil {
+		return int64(f)
+	}
+	return -1
+}
+
+// Totals returns the client-wide totals seen in the last sync.
+func (c *Client) Totals() (client.Totals, bool) {
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	return c.sync.totals, c.sync.haveTotals
 }
 
 func (s *syncState) list() []client.Torrent {

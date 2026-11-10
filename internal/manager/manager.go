@@ -37,6 +37,8 @@ type InstanceStatus struct {
 	Count        int                 `json:"count"`
 	DownloadRate int64               `json:"downloadRate"`
 	UploadRate   int64               `json:"uploadRate"`
+	// Totals are client-wide numbers, when the client reports them.
+	Totals *client.Totals `json:"totals,omitempty"`
 }
 
 // Torrent is a client torrent plus the instance it lives on.
@@ -60,6 +62,7 @@ type entry struct {
 
 	mu        sync.Mutex // serialises fetches for this instance
 	torrents  []client.Torrent
+	totals    *client.Totals
 	version   string
 	err       error
 	checkedAt time.Time // last attempt
@@ -112,6 +115,11 @@ func (e *entry) refresh(ctx context.Context) {
 		return
 	}
 	e.err, e.torrents, e.okAt = nil, ts, e.checkedAt
+	if r, ok := e.cli.(client.TotalsReporter); ok {
+		if t, ok := r.Totals(); ok {
+			e.totals = &t
+		}
+	}
 }
 
 func (e *entry) invalidate() {
@@ -212,6 +220,7 @@ func (m *Manager) Snapshot(ctx context.Context) Snapshot {
 			Online:       e.err == nil,
 			Version:      e.version,
 			Count:        len(e.torrents),
+			Totals:       e.totals,
 		}
 		if e.err != nil {
 			st.Error = e.err.Error()

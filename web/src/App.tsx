@@ -5,6 +5,7 @@ import { count, rate } from './format';
 import { connectionProblem } from './text';
 import { InstanceDialog } from './components/InstanceDialog';
 import { MoveDialog } from './components/MoveDialog';
+import { StatsDialog } from './components/StatsDialog';
 import { TransferPanel } from './components/TransferPanel';
 import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
 import { TorrentTable, torrentKey, type Sort, type SortKey } from './components/TorrentTable';
@@ -51,6 +52,7 @@ export default function App() {
   const [notice, setNotice] = useState<{ text: string; bad?: boolean } | null>(null);
   const [acting, setActing] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [jobs, setJobs] = useState<TransferJob[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(() => loadSet(DISMISSED_KEY));
   // Trackers the user has unticked. Storing the hidden ones (rather than the
@@ -256,6 +258,16 @@ export default function App() {
     });
   }, [inTracker, stateFilter, query, sort, instanceById]);
 
+  const summary = useMemo(() => {
+    let uploaded = 0;
+    let downloaded = 0;
+    for (const t of visible) {
+      uploaded += t.uploaded;
+      downloaded += t.downloaded;
+    }
+    return { uploaded, downloaded, filtered: visible.length !== torrents.length };
+  }, [visible, torrents.length]);
+
   const onSort = (key: SortKey) =>
     setSort((s) =>
       s.key === key
@@ -331,6 +343,7 @@ export default function App() {
 
   const closeDialog = useCallback(() => setDialog(null), []);
   const closeMove = useCallback(() => setMoveOpen(false), []);
+  const closeStats = useCallback(() => setStatsOpen(false), []);
 
   const openEdit = async (id: string) => {
     try {
@@ -367,6 +380,8 @@ export default function App() {
         onToggleTracker={toggleTracker}
         onOnlyTracker={onlyTracker}
         onShowAllTrackers={showAllTrackers}
+        summary={summary}
+        onOpenStats={() => setStatsOpen(true)}
       />
 
       <main className="main">
@@ -540,6 +555,16 @@ export default function App() {
             setMoveOpen(false);
             openEdit(id);
           }}
+        />
+      )}
+
+      {statsOpen && (
+        <StatsDialog
+          instances={instances}
+          torrents={torrents}
+          kinds={kinds}
+          colorOf={colorOf}
+          onClose={closeStats}
         />
       )}
 

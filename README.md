@@ -21,6 +21,7 @@ Tidlig skjelett. Dette fungerer:
 - legge til, endre og fjerne klienter, med tilkoblingstest
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
 - trackerfilter: huk av hvilke trackere som skal vises (valget huskes i nettleseren)
+- hvor mye som er lastet opp: for utvalget i sidemenyen, og per tracker og klient under «Se statistikk»
 - pause og gjenoppta, også på tvers av klienter i samme operasjon
 - flytte torrenter mellom klienter på samme server, med valgfri flytting av filene til en ny mappe
 
@@ -83,6 +84,17 @@ endres den senere, nekter Stim å koble til til du har godtatt den nye under End
 
 Stim leser bare `.torrent`-filer over SFTP, men SSH-innloggingen gir full tilgang til kontoen på serveren,
 og den lagres i klartekst i `config/instances.json`. Bruk gjerne en egen nøkkel kun for Stim.
+
+## Opplastet mengde
+
+Sidemenyen viser hvor mye torrentene i listen har lastet opp, med ratio, og følger filtrene du har valgt.
+**Se statistikk** viser det samme per tracker og per klient.
+
+- **Lastet opp** er summen av det hver torrent har lastet opp, slik klienten oppgir det. Bare torrenter
+  som ligger i klientene nå er med, og en torrent som flyttes til en annen klient begynner på 0 der.
+- **Totalt i klienten** er klientens egen sum over alle tider, også for fjernede torrenter, inkludert
+  protokolltrafikk. qBittorrent fører den alltid. Deluge fører den bare med Stats-pluginen slått på, og
+  teller da fra den ble slått på.
 
 ## Kjøre uten Docker
 

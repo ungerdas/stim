@@ -3,6 +3,8 @@ package qbittorrent
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/ungerdas/stim/internal/client"
 )
 
 func md(t *testing.T, s string) mainData {
@@ -32,11 +34,12 @@ func TestSyncMergesPartialUpdates(t *testing.T) {
 		{ // full update; qBittorrent 4 leaves "tracker" empty for a tracker that is down
 			`{"rid":1,"full_update":true,
 			  "torrents":{"AAA":{"name":"a","state":"stalledUP","tracker":""},"bbb":{"name":"b","state":"uploading","tracker":"https://t.norbits.net/announce"}},
-			  "trackers":{"https://norbits.net/announce.php?passkey=x":["aaa"],"https://t.norbits.net/announce":["bbb"]}}`,
+			  "trackers":{"https://norbits.net/announce.php?passkey=x":["aaa"],"https://t.norbits.net/announce":["bbb"]},
+			  "server_state":{"alltime_ul":5000000000000,"alltime_dl":100,"up_info_data":1024,"dl_info_data":0}}`,
 			map[string]string{"aaa": "stalledUP|norbits.net|a", "bbb": "uploading|norbits.net|b"},
 		},
 		{ // only the changed field arrives
-			`{"rid":2,"torrents":{"aaa":{"state":"pausedUP"}}}`,
+			`{"rid":2,"torrents":{"aaa":{"state":"pausedUP"}},"server_state":{"up_info_data":2048}}`,
 			map[string]string{"aaa": "pausedUP|norbits.net|a", "bbb": "uploading|norbits.net|b"},
 		},
 		{ // a new torrent and a full hash list for its tracker
@@ -68,5 +71,20 @@ func TestSyncMergesPartialUpdates(t *testing.T) {
 	}
 	if s.rid != 1 {
 		t.Errorf("rid = %d, want 1", s.rid)
+	}
+	// The last step was a full update without server_state.
+	if s.totals.AllTimeUpload != -1 {
+		t.Errorf("totals should be reset by a full update, got %+v", s.totals)
+	}
+}
+
+func TestSyncTotalsMergeChanges(t *testing.T) {
+	var s syncState
+	s.reset()
+	_ = s.apply(md(t, `{"rid":1,"full_update":true,"server_state":{"alltime_ul":5000000000000,"alltime_dl":100,"up_info_data":1024,"dl_info_data":0}}`))
+	_ = s.apply(md(t, `{"rid":2,"server_state":{"up_info_data":2048}}`))
+	want := client.Totals{AllTimeUpload: 5000000000000, AllTimeDownload: 100, SessionUpload: 2048, SessionDownload: 0}
+	if s.totals != want || !s.haveTotals {
+		t.Errorf("totals = %+v, want %+v", s.totals, want)
 	}
 }

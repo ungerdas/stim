@@ -86,6 +86,28 @@ type Client interface {
 	Resume(ctx context.Context, hashes []string) error
 }
 
+// Totals are client-wide transfer totals in bytes, including protocol
+// overhead. -1 means the client does not report that number.
+type Totals struct {
+	// AllTimeUpload covers every torrent the client has had, also removed
+	// ones. qBittorrent keeps it; Deluge only with its Stats plugin enabled.
+	AllTimeUpload   int64 `json:"allTimeUpload"`
+	AllTimeDownload int64 `json:"allTimeDownload"`
+	// Session totals reset when the client restarts.
+	SessionUpload   int64 `json:"sessionUpload"`
+	SessionDownload int64 `json:"sessionDownload"`
+}
+
+// UnknownTotals is a Totals with nothing known.
+var UnknownTotals = Totals{AllTimeUpload: -1, AllTimeDownload: -1, SessionUpload: -1, SessionDownload: -1}
+
+// TotalsReporter is implemented by adapters that know client-wide totals.
+// Totals returns what was seen during the last successful Torrents call;
+// ok is false before the first one.
+type TotalsReporter interface {
+	Totals() (t Totals, ok bool)
+}
+
 // AddOptions describes how Stim hands a torrent to a client.
 type AddOptions struct {
 	SavePath string   // where the data already is, as the client sees the path

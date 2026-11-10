@@ -1,5 +1,5 @@
 import type { InstanceStatus, KindInfo, State } from '../types';
-import { count } from '../format';
+import { bytes, count, ratio } from '../format';
 import { instanceProblemShort, stateLabel } from '../text';
 
 export type StateFilter = State | 'all' | 'active';
@@ -21,6 +21,9 @@ interface Props {
   onToggleTracker: (tracker: string) => void;
   onOnlyTracker: (tracker: string) => void;
   onShowAllTrackers: () => void;
+  /** Totals for the torrents in the list as it is filtered now. */
+  summary: { uploaded: number; downloaded: number; filtered: boolean };
+  onOpenStats: () => void;
 }
 
 export interface TrackerCount {
@@ -59,6 +62,21 @@ export function Sidebar(props: Props) {
         <span className="brand-name">Stim</span>
         <span className="side-build">Bygget {buildStamp}</span>
       </div>
+
+      <section className="side-summary" aria-labelledby="side-summary-heading">
+        <h2 id="side-summary-heading" className="side-heading">
+          {props.summary.filtered ? 'Lastet opp i utvalget' : 'Lastet opp'}
+        </h2>
+        <p className="summary-big">{bytes(props.summary.uploaded)}</p>
+        <p className="summary-sub">
+          {props.summary.downloaded > 0
+            ? `Ratio ${ratio(props.summary.uploaded / props.summary.downloaded)} · ${bytes(props.summary.downloaded)} ned`
+            : 'Ingenting lastet ned'}
+        </p>
+        <button type="button" className="side-heading-action summary-link" onClick={props.onOpenStats}>
+          Se statistikk
+        </button>
+      </section>
 
       <nav className="side-section" aria-labelledby="side-clients">
         <h2 id="side-clients" className="side-heading">

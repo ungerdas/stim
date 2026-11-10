@@ -53,6 +53,13 @@ export interface InstanceStatus {
   count: number;
   downloadRate: number;
   uploadRate: number;
+  /** Client-wide totals in bytes; -1 where the client does not report one. */
+  totals?: {
+    allTimeUpload: number;
+    allTimeDownload: number;
+    sessionUpload: number;
+    sessionDownload: number;
+  };
 }
 
 export interface Snapshot {
