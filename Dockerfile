@@ -9,9 +9,10 @@ COPY web/ ./
 RUN npm run build
 
 # 2. Build the Go binary with the UI embedded.
-FROM golang:1.24-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
 COPY --from=web /src/internal/webui/dist/ internal/webui/dist/

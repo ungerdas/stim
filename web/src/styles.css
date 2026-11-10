@@ -435,6 +435,149 @@ input[type='radio'] {
   color: var(--bg);
 }
 
+.btn-small {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+/* ---------- moves between clients ---------- */
+
+.transfers {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line);
+}
+
+.transfer + .transfer {
+  border-top: 1px solid var(--line);
+}
+
+.transfer-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px;
+}
+
+.transfer-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-current {
+  color: var(--ink-soft);
+}
+
+.transfer-bad {
+  color: var(--bad);
+}
+
+.transfer-bar {
+  flex: 0 0 160px;
+}
+
+.transfer-bar .bar-fill {
+  background: var(--ink);
+}
+
+.transfer.has-failures .transfer-bar .bar-fill {
+  background: var(--bad);
+}
+
+.transfer-items {
+  max-height: 260px;
+  overflow: auto;
+  padding: 0 18px 10px 39px;
+  scrollbar-color: #3a3a3a transparent;
+}
+
+.transfer-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: 16px;
+  padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+  font-size: 13px;
+}
+
+.transfer-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-item-from,
+.transfer-item-state {
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.transfer-item.state-done .transfer-item-state {
+  color: var(--seeding);
+}
+
+.transfer-item.state-failed .transfer-item-state {
+  color: var(--bad);
+}
+
+.transfer-item-problem {
+  grid-column: 1 / -1;
+  color: var(--bad);
+}
+
+.target-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.target-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.target-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  cursor: pointer;
+}
+
+.target-option:has(input:checked) {
+  border-color: var(--mark);
+  box-shadow: inset 0 0 0 1px var(--mark);
+}
+
+.target-option:has(input:disabled) {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.target-name {
+  font-weight: 600;
+}
+
+.target-sub {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.status-bad p + p,
+.status-bad p + .btn {
+  margin-top: 8px;
+}
+
 /* ---------- table ---------- */
 
 .table {
@@ -781,6 +924,23 @@ input[type='radio'] {
   font-weight: 600;
 }
 
+.field textarea {
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  resize: vertical;
+  min-width: 0;
+  color-scheme: dark;
+}
+
+.field-port {
+  flex: 0 0 88px;
+}
+
 .field input {
   height: 36px;
   padding: 0 11px;
@@ -842,6 +1002,15 @@ input[type='radio'] {
 
 .advanced .field-row {
   margin: 10px 0;
+}
+
+.advanced > .field,
+.advanced > .hint {
+  margin-bottom: 10px;
+}
+
+.advanced > :last-child {
+  margin-bottom: 0;
 }
 
 .hint {
@@ -1008,6 +1177,24 @@ input[type='radio'] {
   .search {
     max-width: none;
     flex-basis: 100%;
+  }
+
+  .transfer-head {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+  }
+
+  .transfer-summary {
+    flex-basis: calc(100% - 24px);
+    white-space: normal;
+  }
+
+  .transfer-bar {
+    flex: 1;
+  }
+
+  .transfer-items {
+    padding: 0 12px 10px;
   }
 
   .field-row {

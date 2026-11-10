@@ -86,6 +86,45 @@ type Client interface {
 	Resume(ctx context.Context, hashes []string) error
 }
 
+// AddOptions describes how Stim hands a torrent to a client.
+type AddOptions struct {
+	SavePath string   // where the data already is, as the client sees the path
+	Label    string   // category/label; empty for none
+	Tags     []string // ignored by clients without tags
+}
+
+// Transferer is implemented by adapters whose torrents can be moved to and
+// from other clients. Every method must be safe to call on a torrent whose
+// data another client is still seeding.
+type Transferer interface {
+	// Torrent returns one torrent; ok is false when the client does not
+	// have it.
+	Torrent(ctx context.Context, hash string) (t Torrent, ok bool, err error)
+	// AddStopped adds a .torrent without starting it. The client must use
+	// opts.SavePath as is, keep the original file layout, and must not move
+	// the data anywhere on its own afterwards.
+	AddStopped(ctx context.Context, torrentFile []byte, opts AddOptions) error
+	// Recheck makes the client hash the files on disk.
+	Recheck(ctx context.Context, hash string) error
+	// RemoveKeepData removes the torrent from the client and leaves every
+	// file on disk. There is deliberately no flag for deleting data here.
+	RemoveKeepData(ctx context.Context, hash string) error
+	// Move asks the client to move the torrent's data to path.
+	Move(ctx context.Context, hash, path string) error
+}
+
+// Exporter is implemented by adapters that can hand out the original
+// .torrent file through the client's API.
+type Exporter interface {
+	ExportTorrent(ctx context.Context, hash string) ([]byte, error)
+}
+
+// TrackerLister returns a torrent's announce URLs. It is used to restore
+// them when a stored .torrent file has none.
+type TrackerLister interface {
+	Trackers(ctx context.Context, hash string) ([]string, error)
+}
+
 // Info describes a client type to the UI, so the "add instance" form is
 // driven by the backend and needs no changes when a new adapter is added.
 type Info struct {
@@ -94,6 +133,11 @@ type Info struct {
 	NeedsUsername bool         `json:"needsUsername"`
 	URLHint       string       `json:"urlHint"`
 	Capabilities  Capabilities `json:"capabilities"`
+	// ExportsTorrentFiles is true when the client's API can hand out
+	// .torrent files. Otherwise moving torrents away from it needs file
+	// access to TorrentDirHint on the server.
+	ExportsTorrentFiles bool   `json:"exportsTorrentFiles"`
+	TorrentDirHint      string `json:"torrentDirHint,omitempty"`
 }
 
 // Factory builds a Client for one instance.

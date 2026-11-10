@@ -15,6 +15,7 @@ import (
 	"github.com/ungerdas/stim/internal/api"
 	"github.com/ungerdas/stim/internal/manager"
 	"github.com/ungerdas/stim/internal/store"
+	"github.com/ungerdas/stim/internal/transfer"
 	"github.com/ungerdas/stim/internal/webui"
 
 	// Client adapters register themselves on import. Add new ones here.
@@ -24,6 +25,21 @@ import (
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
+
+// hostKeys stores an SSH host key seen on first contact and lets the
+// manager pick up the changed instance.
+type hostKeys struct {
+	store   *store.Store
+	manager *manager.Manager
+}
+
+func (h hostKeys) SetHostKey(id, key string) error {
+	if err := h.store.SetHostKey(id, key); err != nil {
+		return err
+	}
+	h.manager.Reload()
+	return nil
+}
 
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -47,10 +63,11 @@ func main() {
 		log.Fatalf("open config: %v", err)
 	}
 	mgr := manager.New(st)
+	transfers := transfer.New(mgr, hostKeys{st, mgr}, transfer.DefaultTiming)
 
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(host, port),
-		Handler:           api.New(st, mgr, webui.FS(), version),
+		Handler:           api.New(st, mgr, transfers, webui.FS(), version),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

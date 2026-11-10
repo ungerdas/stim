@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/ungerdas/stim/internal/client"
+	"github.com/ungerdas/stim/internal/remotefiles"
 )
 
 // Instance is one configured torrent client. Passwords are stored as-is in
@@ -27,6 +28,29 @@ type Instance struct {
 	BasicUser     string      `json:"basicUser,omitempty"`
 	BasicPass     string      `json:"basicPass,omitempty"`
 	TLSSkipVerify bool        `json:"tlsSkipVerify,omitempty"`
+
+	// SSH access to the server the client runs on. Only used to read
+	// .torrent files from TorrentDir when moving torrents away from a client
+	// whose API cannot export them.
+	SSHHost     string `json:"sshHost,omitempty"`
+	SSHPort     int    `json:"sshPort,omitempty"`
+	SSHUser     string `json:"sshUser,omitempty"`
+	SSHPassword string `json:"sshPassword,omitempty"`
+	SSHKey      string `json:"sshKey,omitempty"`
+	SSHHostKey  string `json:"sshHostKey,omitempty"` // stored on first contact
+	TorrentDir  string `json:"torrentDir,omitempty"`
+}
+
+// SSHConfig converts the instance's SSH settings for the remotefiles package.
+func (i Instance) SSHConfig() remotefiles.Config {
+	return remotefiles.Config{
+		Host:       i.SSHHost,
+		Port:       i.SSHPort,
+		User:       i.SSHUser,
+		Password:   i.SSHPassword,
+		PrivateKey: i.SSHKey,
+		HostKey:    i.SSHHostKey,
+	}
 }
 
 // ClientConfig converts the instance to what an adapter needs.
@@ -52,7 +76,31 @@ func (i Instance) Validate() error {
 	if _, err := client.BaseURL(i.URL); err != nil {
 		return err
 	}
+	if i.SSHPort < 0 || i.SSHPort > 65535 {
+		return errors.New("SSH port must be between 1 and 65535")
+	}
 	return nil
+}
+
+// SetHostKey stores the SSH host key seen on first contact. It does nothing
+// when a key is already stored, so a changed key can never overwrite it.
+func (s *Store) SetHostKey(id, hostKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for idx, old := range s.data.Instances {
+		if old.ID == id {
+			if old.SSHHostKey != "" || hostKey == "" {
+				return nil
+			}
+			s.data.Instances[idx].SSHHostKey = hostKey
+			if err := s.save(); err != nil {
+				s.data.Instances[idx] = old
+				return err
+			}
+			return nil
+		}
+	}
+	return ErrNotFound
 }
 
 type file struct {

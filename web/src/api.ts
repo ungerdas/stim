@@ -1,4 +1,12 @@
-import type { InstanceConfig, InstanceInput, KindInfo, Snapshot, TestResult } from './types';
+import type {
+  InstanceConfig,
+  InstanceInput,
+  KindInfo,
+  Snapshot,
+  TestResult,
+  TransferJob,
+  TransferRequest,
+} from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -27,4 +35,7 @@ export const api = {
   testInstance: (input: InstanceInput) => request<TestResult>('/api/instances/test', json('POST', input)),
   act: (action: 'pause' | 'resume', items: { instanceId: string; hash: string }[]) =>
     request<{ failed: Record<string, string> }>('/api/torrents/action', json('POST', { action, items })),
+  transfers: () => request<TransferJob[]>('/api/transfers'),
+  startTransfer: (req: TransferRequest) => request<TransferJob>('/api/transfers', json('POST', req)),
+  cancelTransfer: (id: string) => request<void>(`/api/transfers/${id}/cancel`, json('POST', {})),
 };

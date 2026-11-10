@@ -13,20 +13,23 @@ import (
 
 	"github.com/ungerdas/stim/internal/client"
 	"github.com/ungerdas/stim/internal/manager"
+	"github.com/ungerdas/stim/internal/remotefiles"
 	"github.com/ungerdas/stim/internal/store"
+	"github.com/ungerdas/stim/internal/transfer"
 )
 
 // Server wires the store and manager to HTTP.
 type Server struct {
-	store   *store.Store
-	manager *manager.Manager
-	ui      fs.FS
-	version string
+	store     *store.Store
+	manager   *manager.Manager
+	transfers *transfer.Engine
+	ui        fs.FS
+	version   string
 }
 
 // New builds the HTTP handler. ui is the built frontend (may be empty).
-func New(s *store.Store, m *manager.Manager, ui fs.FS, version string) http.Handler {
-	srv := &Server{store: s, manager: m, ui: ui, version: version}
+func New(s *store.Store, m *manager.Manager, t *transfer.Engine, ui fs.FS, version string) http.Handler {
+	srv := &Server{store: s, manager: m, transfers: t, ui: ui, version: version}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", srv.health)
@@ -39,6 +42,9 @@ func New(s *store.Store, m *manager.Manager, ui fs.FS, version string) http.Hand
 	mux.HandleFunc("POST /api/instances/{id}/retry", srv.retryInstance)
 	mux.HandleFunc("GET /api/torrents", srv.torrents)
 	mux.HandleFunc("POST /api/torrents/action", srv.action)
+	mux.HandleFunc("GET /api/transfers", srv.listTransfers)
+	mux.HandleFunc("POST /api/transfers", srv.startTransfer)
+	mux.HandleFunc("POST /api/transfers/{id}/cancel", srv.cancelTransfer)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 	})
@@ -117,10 +123,26 @@ type instanceView struct {
 	BasicUser     string      `json:"basicUser"`
 	HasBasicPass  bool        `json:"hasBasicPass"`
 	TLSSkipVerify bool        `json:"tlsSkipVerify"`
+
+	SSHHost            string `json:"sshHost"`
+	SSHPort            int    `json:"sshPort"`
+	SSHUser            string `json:"sshUser"`
+	HasSSHPassword     bool   `json:"hasSshPassword"`
+	HasSSHKey          bool   `json:"hasSshKey"`
+	SSHHostFingerprint string `json:"sshHostFingerprint"`
+	TorrentDir         string `json:"torrentDir"`
 }
 
 func view(in store.Instance) instanceView {
 	return instanceView{
+		SSHHost:            in.SSHHost,
+		SSHPort:            in.SSHPort,
+		SSHUser:            in.SSHUser,
+		HasSSHPassword:     in.SSHPassword != "",
+		HasSSHKey:          in.SSHKey != "",
+		SSHHostFingerprint: remotefiles.Fingerprint(in.SSHHostKey),
+		TorrentDir:         in.TorrentDir,
+
 		ID:            in.ID,
 		Name:          in.Name,
 		Kind:          in.Kind,
@@ -145,6 +167,17 @@ type instanceInput struct {
 	BasicUser     string      `json:"basicUser"`
 	BasicPass     *string     `json:"basicPass"`
 	TLSSkipVerify bool        `json:"tlsSkipVerify"`
+
+	SSHHost     string  `json:"sshHost"`
+	SSHPort     int     `json:"sshPort"`
+	SSHUser     string  `json:"sshUser"`
+	SSHPassword *string `json:"sshPassword"`
+	SSHKey      *string `json:"sshKey"`
+	TorrentDir  string  `json:"torrentDir"`
+	// SSHHostKey is the key the user saw when testing the connection; it is
+	// stored so later connections must present the same one.
+	SSHHostKey    string `json:"sshHostKey"`
+	ForgetHostKey bool   `json:"forgetHostKey"`
 }
 
 // merge applies the input on top of an existing instance (zero for new ones).
@@ -168,6 +201,32 @@ func (in instanceInput) merge(base store.Instance) store.Instance {
 	}
 	if out.BasicUser == "" {
 		out.BasicPass = ""
+	}
+
+	out.SSHHost = strings.TrimSpace(in.SSHHost)
+	out.SSHPort = in.SSHPort
+	out.SSHUser = strings.TrimSpace(in.SSHUser)
+	out.TorrentDir = strings.TrimSpace(in.TorrentDir)
+	out.SSHPassword, out.SSHKey, out.SSHHostKey = base.SSHPassword, base.SSHKey, base.SSHHostKey
+	if in.SSHPassword != nil {
+		out.SSHPassword = *in.SSHPassword
+	}
+	if in.SSHKey != nil {
+		out.SSHKey = strings.TrimSpace(*in.SSHKey)
+		if out.SSHKey != "" {
+			out.SSHKey += "\n" // PEM parsers want the trailing newline
+		}
+	}
+	// A stored host key belongs to one server. Forget it when the address
+	// changes or the user asks; otherwise keep it and never overwrite it.
+	if in.ForgetHostKey || out.SSHHost != base.SSHHost || out.SSHPort != base.SSHPort {
+		out.SSHHostKey = ""
+	}
+	if out.SSHHostKey == "" && remotefiles.Fingerprint(in.SSHHostKey) != "" {
+		out.SSHHostKey = strings.TrimSpace(in.SSHHostKey)
+	}
+	if out.SSHHost == "" {
+		out.SSHUser, out.SSHPassword, out.SSHKey, out.SSHHostKey, out.SSHPort = "", "", "", "", 0
 	}
 	return out
 }
@@ -255,12 +314,66 @@ func (s *Server) testInstance(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	version, err := manager.Test(r.Context(), candidate)
+	// The client and SSH are tested independently, so a typo in one does
+	// not hide the result of the other.
+	res := map[string]any{"ok": true}
+	if version, err := manager.Test(r.Context(), candidate); err != nil {
+		res["ok"], res["error"], res["errorCode"] = false, err.Error(), client.ErrorCode(err)
+	} else {
+		res["version"] = version
+	}
+	if candidate.SSHHost != "" {
+		res["ssh"] = testSSH(r, candidate)
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// testSSH tries the SSH settings and lists the torrent folder.
+func testSSH(r *http.Request, in store.Instance) map[string]any {
+	cfg := in.SSHConfig()
+	if !cfg.Configured() {
+		return map[string]any{"ok": false, "error": "SSH needs a user name and a password or key"}
+	}
+	if in.TorrentDir == "" {
+		return map[string]any{"ok": false, "error": "the torrent folder is not filled in"}
+	}
+	count, hostKey, err := remotefiles.Probe(r.Context(), cfg, in.TorrentDir)
+	res := map[string]any{"ok": err == nil, "torrents": count}
+	if hostKey != "" {
+		res["hostKey"] = hostKey
+		res["fingerprint"] = remotefiles.Fingerprint(hostKey)
+		res["newHostKey"] = cfg.HostKey == ""
+	}
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error(), "errorCode": client.ErrorCode(err)})
+		res["error"] = err.Error()
+		res["hostKeyChanged"] = errors.Is(err, remotefiles.ErrHostKeyChanged)
+	}
+	return res
+}
+
+func (s *Server) listTransfers(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.transfers.Jobs())
+}
+
+func (s *Server) startTransfer(w http.ResponseWriter, r *http.Request) {
+	var req transfer.Request
+	if !readJSON(w, r, &req) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version})
+	job, err := s.transfers.Start(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) cancelTransfer(w http.ResponseWriter, r *http.Request) {
+	if !s.transfers.Cancel(r.PathValue("id")) {
+		writeError(w, http.StatusNotFound, "no running move with that id")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) torrents(w http.ResponseWriter, r *http.Request) {

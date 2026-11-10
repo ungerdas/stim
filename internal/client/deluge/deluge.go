@@ -28,6 +28,11 @@ func init() {
 		NeedsUsername: false, // the web UI only has a password
 		URLHint:       "http://192.168.1.10:8112",
 		Capabilities:  caps,
+
+		// Deluge has no API call that returns a .torrent file; they live in
+		// the daemon's state folder.
+		ExportsTorrentFiles: false,
+		TorrentDirHint:      ".config/deluge/state",
 	}, New)
 }
 
@@ -267,55 +272,59 @@ func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
 	}
 	out := make([]client.Torrent, 0, len(raw))
 	for hash, t := range raw {
-		progress := t.Progress / 100
-		done := progress >= 1
-
-		downloaded := int64(t.AllTimeDownload)
-		if downloaded <= 0 {
-			downloaded = int64(t.TotalDone)
-		}
-		eta := int64(t.ETA)
-		if eta <= 0 || done {
-			eta = -1
-		}
-		completed := int64(t.CompletedTime)
-		if completed < 0 || !done {
-			completed = 0
-		}
-		path := t.DownloadLocation
-		if path == "" {
-			path = t.SavePath
-		}
-		state := mapState(t.State)
-		msg := ""
-		if state == client.StateError {
-			msg = t.Message
-		}
-		out = append(out, client.Torrent{
-			Hash:         strings.ToLower(hash),
-			Name:         t.Name,
-			State:        state,
-			RawState:     t.State,
-			Progress:     progress,
-			Size:         int64(t.TotalWanted),
-			Downloaded:   downloaded,
-			Uploaded:     int64(t.TotalUploaded),
-			DownloadRate: int64(t.DownloadRate),
-			UploadRate:   int64(t.UploadRate),
-			Ratio:        t.Ratio,
-			ETA:          eta,
-			Seeds:        int(t.NumSeeds),
-			Peers:        int(t.NumPeers),
-			Label:        t.Label,
-			Tags:         []string{},
-			Tracker:      t.TrackerHost,
-			SavePath:     path,
-			AddedAt:      int64(t.TimeAdded),
-			CompletedAt:  completed,
-			Message:      msg,
-		})
+		out = append(out, t.toTorrent(hash))
 	}
 	return out, nil
+}
+
+func (t apiTorrent) toTorrent(hash string) client.Torrent {
+	progress := t.Progress / 100
+	done := progress >= 1
+
+	downloaded := int64(t.AllTimeDownload)
+	if downloaded <= 0 {
+		downloaded = int64(t.TotalDone)
+	}
+	eta := int64(t.ETA)
+	if eta <= 0 || done {
+		eta = -1
+	}
+	completed := int64(t.CompletedTime)
+	if completed < 0 || !done {
+		completed = 0
+	}
+	path := t.DownloadLocation
+	if path == "" {
+		path = t.SavePath
+	}
+	state := mapState(t.State)
+	msg := ""
+	if state == client.StateError {
+		msg = t.Message
+	}
+	return client.Torrent{
+		Hash:         strings.ToLower(hash),
+		Name:         t.Name,
+		State:        state,
+		RawState:     t.State,
+		Progress:     progress,
+		Size:         int64(t.TotalWanted),
+		Downloaded:   downloaded,
+		Uploaded:     int64(t.TotalUploaded),
+		DownloadRate: int64(t.DownloadRate),
+		UploadRate:   int64(t.UploadRate),
+		Ratio:        t.Ratio,
+		ETA:          eta,
+		Seeds:        int(t.NumSeeds),
+		Peers:        int(t.NumPeers),
+		Label:        t.Label,
+		Tags:         []string{},
+		Tracker:      t.TrackerHost,
+		SavePath:     path,
+		AddedAt:      int64(t.TimeAdded),
+		CompletedAt:  completed,
+		Message:      msg,
+	}
 }
 
 func mapState(s string) client.State {

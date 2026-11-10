@@ -52,8 +52,11 @@ type Snapshot struct {
 }
 
 type entry struct {
-	inst store.Instance
-	cli  client.Client
+	// instMu guards inst on its own, so settings can be read and replaced
+	// while a (possibly slow) fetch holds mu.
+	instMu sync.RWMutex
+	inst   store.Instance
+	cli    client.Client
 
 	mu        sync.Mutex // serialises fetches for this instance
 	torrents  []client.Torrent
@@ -61,6 +64,18 @@ type entry struct {
 	err       error
 	checkedAt time.Time // last attempt
 	okAt      time.Time // last success
+}
+
+func (e *entry) instance() store.Instance {
+	e.instMu.RLock()
+	defer e.instMu.RUnlock()
+	return e.inst
+}
+
+func (e *entry) setInstance(in store.Instance) {
+	e.instMu.Lock()
+	e.inst = in
+	e.instMu.Unlock()
 }
 
 func (e *entry) refresh(ctx context.Context) {
@@ -142,7 +157,10 @@ func (m *Manager) Reload() {
 	order := make([]string, 0, len(list))
 	for _, in := range list {
 		order = append(order, in.ID)
-		if old, ok := m.entries[in.ID]; ok && old.inst == in {
+		if old, ok := m.entries[in.ID]; ok && old.instance().Kind == in.Kind && old.instance().ClientConfig() == in.ClientConfig() {
+			// Same connection settings: keep the client and its session, and
+			// just pick up the other fields (name, SSH settings).
+			old.setInstance(in)
 			next[in.ID] = old
 			continue
 		}
@@ -184,11 +202,12 @@ func (m *Manager) Snapshot(ctx context.Context) Snapshot {
 
 	snap := Snapshot{Instances: []InstanceStatus{}, Torrents: []Torrent{}}
 	for _, e := range entries {
+		inst := e.instance()
 		e.mu.Lock()
 		st := InstanceStatus{
-			ID:           e.inst.ID,
-			Name:         e.inst.Name,
-			Kind:         e.inst.Kind,
+			ID:           inst.ID,
+			Name:         inst.Name,
+			Kind:         inst.Kind,
 			Capabilities: e.cli.Capabilities(),
 			Online:       e.err == nil,
 			Version:      e.version,
@@ -204,7 +223,7 @@ func (m *Manager) Snapshot(ctx context.Context) Snapshot {
 		for _, t := range e.torrents {
 			st.DownloadRate += t.DownloadRate
 			st.UploadRate += t.UploadRate
-			snap.Torrents = append(snap.Torrents, Torrent{Torrent: t, InstanceID: e.inst.ID})
+			snap.Torrents = append(snap.Torrents, Torrent{Torrent: t, InstanceID: inst.ID})
 		}
 		e.mu.Unlock()
 		snap.Instances = append(snap.Instances, st)
@@ -218,6 +237,28 @@ func (m *Manager) Snapshot(ctx context.Context) Snapshot {
 		return a.Hash < b.Hash
 	})
 	return snap
+}
+
+// Lookup returns the live client and current settings of an instance.
+func (m *Manager) Lookup(id string) (client.Client, store.Instance, bool) {
+	m.mu.RLock()
+	e, ok := m.entries[id]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, store.Instance{}, false
+	}
+	return e.cli, e.instance(), true
+}
+
+// Invalidate makes the next snapshot refetch the given instances.
+func (m *Manager) Invalidate(ids ...string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, id := range ids {
+		if e, ok := m.entries[id]; ok {
+			e.invalidate()
+		}
+	}
 }
 
 // Retry makes the next snapshot contact the instance again right away, even
@@ -277,7 +318,7 @@ func (m *Manager) Act(ctx context.Context, action string, items []Item) (map[str
 			e.invalidate()
 			if err != nil {
 				mu.Lock()
-				failed[e.inst.ID] = err.Error()
+				failed[e.instance().ID] = err.Error()
 				mu.Unlock()
 			}
 		}(e, hashes)

@@ -2,6 +2,7 @@
 package qbittorrent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,8 @@ func init() {
 		NeedsUsername: true,
 		URLHint:       "http://192.168.1.10:8080",
 		Capabilities:  caps,
+
+		ExportsTorrentFiles: true,
 	}, New)
 }
 
@@ -56,17 +59,30 @@ var errAuth = fmt.Errorf("%w: wrong username or password", client.ErrAuth)
 
 var errNotQBittorrent = fmt.Errorf("%w: the URL did not answer like a qBittorrent WebUI", client.ErrNotClient)
 
-func (c *Client) newRequest(ctx context.Context, method, path string, form url.Values) (*http.Request, error) {
+// payload is a request body with its content type.
+type payload struct {
+	body        []byte
+	contentType string
+}
+
+func formPayload(form url.Values) *payload {
+	if form == nil {
+		return nil
+	}
+	return &payload{body: []byte(form.Encode()), contentType: "application/x-www-form-urlencoded"}
+}
+
+func (c *Client) newRequest(ctx context.Context, method, path string, p *payload) (*http.Request, error) {
 	var body io.Reader
-	if form != nil {
-		body = strings.NewReader(form.Encode())
+	if p != nil {
+		body = bytes.NewReader(p.body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
 		return nil, err
 	}
-	if form != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if p != nil {
+		req.Header.Set("Content-Type", p.contentType)
 	}
 	// qBittorrent's CSRF protection requires Referer/Origin to match the host.
 	req.Header.Set("Referer", c.base)
@@ -78,7 +94,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, form url.V
 
 func (c *Client) login(ctx context.Context) error {
 	form := url.Values{"username": {c.cfg.Username}, "password": {c.cfg.Password}}
-	req, err := c.newRequest(ctx, http.MethodPost, "/api/v2/auth/login", form)
+	req, err := c.newRequest(ctx, http.MethodPost, "/api/v2/auth/login", formPayload(form))
 	if err != nil {
 		return err
 	}
@@ -109,8 +125,12 @@ func (c *Client) login(ctx context.Context) error {
 // do performs a request and logs in (once) if the session is missing or has
 // expired. qBittorrent answers 403 to API calls without a valid session.
 func (c *Client) do(ctx context.Context, method, path string, form url.Values) ([]byte, int, error) {
+	return c.doPayload(ctx, method, path, formPayload(form))
+}
+
+func (c *Client) doPayload(ctx context.Context, method, path string, p *payload) ([]byte, int, error) {
 	for attempt := 0; ; attempt++ {
-		req, err := c.newRequest(ctx, method, path, form)
+		req, err := c.newRequest(ctx, method, path, p)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -193,38 +213,42 @@ func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
 	}
 	out := make([]client.Torrent, 0, len(raw))
 	for _, t := range raw {
-		eta := t.ETA
-		if eta >= etaInfinity || eta < 0 {
-			eta = -1
-		}
-		completed := t.CompletionOn
-		if completed < 0 || t.Progress < 1 {
-			completed = 0
-		}
-		out = append(out, client.Torrent{
-			Hash:         strings.ToLower(t.Hash),
-			Name:         t.Name,
-			State:        mapState(t.State),
-			RawState:     t.State,
-			Progress:     t.Progress,
-			Size:         t.Size,
-			Downloaded:   t.Downloaded,
-			Uploaded:     t.Uploaded,
-			DownloadRate: t.DlSpeed,
-			UploadRate:   t.UpSpeed,
-			Ratio:        t.Ratio,
-			ETA:          eta,
-			Seeds:        t.NumSeeds,
-			Peers:        t.NumLeechs,
-			Label:        t.Category,
-			Tags:         splitTags(t.Tags),
-			Tracker:      client.TrackerHost(t.Tracker),
-			SavePath:     t.SavePath,
-			AddedAt:      t.AddedOn,
-			CompletedAt:  completed,
-		})
+		out = append(out, t.toTorrent())
 	}
 	return out, nil
+}
+
+func (t apiTorrent) toTorrent() client.Torrent {
+	eta := t.ETA
+	if eta >= etaInfinity || eta < 0 {
+		eta = -1
+	}
+	completed := t.CompletionOn
+	if completed < 0 || t.Progress < 1 {
+		completed = 0
+	}
+	return client.Torrent{
+		Hash:         strings.ToLower(t.Hash),
+		Name:         t.Name,
+		State:        mapState(t.State),
+		RawState:     t.State,
+		Progress:     t.Progress,
+		Size:         t.Size,
+		Downloaded:   t.Downloaded,
+		Uploaded:     t.Uploaded,
+		DownloadRate: t.DlSpeed,
+		UploadRate:   t.UpSpeed,
+		Ratio:        t.Ratio,
+		ETA:          eta,
+		Seeds:        t.NumSeeds,
+		Peers:        t.NumLeechs,
+		Label:        t.Category,
+		Tags:         splitTags(t.Tags),
+		Tracker:      client.TrackerHost(t.Tracker),
+		SavePath:     t.SavePath,
+		AddedAt:      t.AddedOn,
+		CompletedAt:  completed,
+	}
 }
 
 func splitTags(s string) []string {

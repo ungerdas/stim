@@ -66,6 +66,9 @@ export interface KindInfo {
   needsUsername: boolean;
   urlHint: string;
   capabilities: Capabilities;
+  /** False when moving torrents away from this client needs SSH access. */
+  exportsTorrentFiles: boolean;
+  torrentDirHint?: string;
 }
 
 /** An instance's saved settings. Passwords never leave the server. */
@@ -79,6 +82,13 @@ export interface InstanceConfig {
   basicUser: string;
   hasBasicPass: boolean;
   tlsSkipVerify: boolean;
+  sshHost: string;
+  sshPort: number;
+  sshUser: string;
+  hasSshPassword: boolean;
+  hasSshKey: boolean;
+  sshHostFingerprint: string;
+  torrentDir: string;
 }
 
 /** What the form sends. Omitted passwords keep the stored value. */
@@ -92,6 +102,25 @@ export interface InstanceInput {
   basicUser: string;
   basicPass?: string;
   tlsSkipVerify: boolean;
+  sshHost: string;
+  sshPort: number;
+  sshUser: string;
+  sshPassword?: string;
+  sshKey?: string;
+  torrentDir: string;
+  /** The host key seen in a test, to be pinned when saving. */
+  sshHostKey?: string;
+  forgetHostKey?: boolean;
+}
+
+export interface SSHTestResult {
+  ok: boolean;
+  error?: string;
+  torrents: number;
+  hostKey?: string;
+  fingerprint?: string;
+  newHostKey?: boolean;
+  hostKeyChanged?: boolean;
 }
 
 export interface TestResult {
@@ -99,4 +128,45 @@ export interface TestResult {
   version?: string;
   error?: string;
   errorCode?: ErrorCode;
+  ssh?: SSHTestResult;
+}
+
+export type TransferState =
+  | 'queued'
+  | 'fetching'
+  | 'adding'
+  | 'checking'
+  | 'removing'
+  | 'moving'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+export interface TransferItem {
+  sourceId: string;
+  hash: string;
+  name: string;
+  state: TransferState;
+  progress: number;
+  code?: string;
+  error?: string;
+  inTarget: boolean;
+}
+
+export interface TransferJob {
+  id: string;
+  targetId: string;
+  removeFromSource: boolean;
+  newPath?: string;
+  items: TransferItem[];
+  createdAt: number;
+  finishedAt: number;
+  cancelling: boolean;
+}
+
+export interface TransferRequest {
+  targetId: string;
+  removeFromSource: boolean;
+  newPath: string;
+  items: { instanceId: string; hash: string; name: string }[];
 }

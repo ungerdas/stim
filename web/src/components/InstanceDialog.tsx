@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import type { InstanceConfig, InstanceInput, KindInfo, TestResult } from '../types';
+import type { InstanceConfig, InstanceInput, KindInfo, SSHTestResult, TestResult } from '../types';
 import { connectionProblem } from '../text';
 
 interface Props {
@@ -21,6 +21,21 @@ interface FormState {
   basicUser: string;
   basicPass: string;
   tlsSkipVerify: boolean;
+  sshHost: string;
+  sshPort: string;
+  sshUser: string;
+  sshPassword: string;
+  sshKey: string;
+  torrentDir: string;
+}
+
+/** The host part of a client URL, to suggest as the SSH host. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
 }
 
 export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
@@ -34,7 +49,16 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
     basicUser: existing?.basicUser ?? '',
     basicPass: '',
     tlsSkipVerify: existing?.tlsSkipVerify ?? false,
+    sshHost: existing?.sshHost ?? '',
+    sshPort: existing?.sshPort ? String(existing.sshPort) : '',
+    sshUser: existing?.sshUser ?? '',
+    sshPassword: '',
+    sshKey: '',
+    torrentDir: existing?.torrentDir ?? '',
   }));
+  // The SSH host key to pin when saving: the one seen in a test on first
+  // contact, or a changed one the user has accepted.
+  const [pinKey, setPinKey] = useState<{ key: string; fingerprint: string; replace: boolean } | null>(null);
   const [busy, setBusy] = useState<'test' | 'save' | 'delete' | null>(null);
   const [test, setTest] = useState<TestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,10 +83,13 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
   }, [onClose]);
 
   const kind = kinds.find((k) => k.kind === form.kind);
+  // SSH access only matters for clients whose API cannot export torrents.
+  const showSSH = kind ? !kind.exportsTorrentFiles : false;
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
     setTest(null);
     setError(null);
+    if (key === 'sshHost' || key === 'sshPort') setPinKey(null);
   };
 
   // Blank password fields are left out, which keeps the stored password.
@@ -76,6 +103,14 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
     basicUser: form.basicUser.trim(),
     basicPass: form.basicPass !== '' || !existing ? form.basicPass : undefined,
     tlsSkipVerify: form.tlsSkipVerify,
+    sshHost: showSSH ? form.sshHost.trim() : '',
+    sshPort: Number.parseInt(form.sshPort, 10) || 0,
+    sshUser: form.sshUser.trim(),
+    sshPassword: form.sshPassword !== '' || !existing ? form.sshPassword : undefined,
+    sshKey: form.sshKey.trim() !== '' || !existing ? form.sshKey : undefined,
+    torrentDir: form.torrentDir.trim(),
+    sshHostKey: pinKey?.key,
+    forgetHostKey: pinKey?.replace,
   });
 
   const runTest = async () => {
@@ -83,7 +118,12 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
     setTest(null);
     setError(null);
     try {
-      setTest(await api.testInstance(input()));
+      const result = await api.testInstance(input());
+      setTest(result);
+      const ssh = result.ssh;
+      if (ssh?.newHostKey && ssh.hostKey && ssh.fingerprint && !pinKey?.replace) {
+        setPinKey({ key: ssh.hostKey, fingerprint: ssh.fingerprint, replace: false });
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -123,6 +163,48 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
   };
 
   const advancedOpen = Boolean(existing?.basicUser || existing?.tlsSkipVerify);
+  const storedFingerprint = existing?.sshHost === form.sshHost.trim() ? existing?.sshHostFingerprint : '';
+
+  const sshStatus = (ssh: SSHTestResult) => {
+    if (ssh.ok) {
+      return (
+        <p className="status-ok">
+          SSH: fant {ssh.torrents} torrentfiler i {form.torrentDir.trim()}.
+          {pinKey && !pinKey.replace && (
+            <>
+              {' '}
+              Serverens nøkkel er {pinKey.fingerprint}. Den lagres sammen med klienten, og Stim nekter senere å koble til
+              hvis den endres.
+            </>
+          )}
+        </p>
+      );
+    }
+    if (ssh.hostKeyChanged) {
+      return (
+        <div className="status-bad">
+          <p>
+            Serverens SSH-nøkkel er endret siden den ble lagret. Det skjer når serveren er installert på nytt, men kan
+            også bety at noen står mellom deg og serveren. Godta bare hvis du vet hvorfor.
+          </p>
+          <p>Ny nøkkel: {ssh.fingerprint}</p>
+          {ssh.hostKey && ssh.fingerprint && (
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => {
+                setPinKey({ key: ssh.hostKey!, fingerprint: ssh.fingerprint!, replace: true });
+                setTest(null);
+              }}
+            >
+              Godta ny nøkkel
+            </button>
+          )}
+        </div>
+      );
+    }
+    return <p className="status-bad">SSH: {ssh.error}</p>;
+  };
 
   return (
     // A plain layer, deliberately not a native modal <dialog>. showModal()
@@ -247,6 +329,89 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
             </label>
           </details>
 
+          {showSSH && (
+            <details className="advanced" open={Boolean(existing?.sshHost)}>
+              <summary>SSH-tilgang, for å flytte torrenter fra denne klienten</summary>
+              <p className="hint">
+                {kind?.label} kan ikke gi fra seg torrentfiler over webgrensesnittet. For å flytte torrenter herfra til
+                en annen klient henter Stim filene fra mappen på serveren over SFTP. Stim leser bare, og bare
+                .torrent-filer.
+              </p>
+              <div className="field-row">
+                <label className="field field-grow">
+                  <span className="field-label">SSH-vert</span>
+                  <input
+                    type="text"
+                    value={form.sshHost}
+                    onChange={(e) => set('sshHost', e.target.value)}
+                    placeholder={hostOf(form.url) || 'server.example.com'}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="field field-port">
+                  <span className="field-label">Port</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.sshPort}
+                    onChange={(e) => set('sshPort', e.target.value.replace(/\D/g, ''))}
+                    placeholder="22"
+                  />
+                </label>
+              </div>
+              <div className="field-row">
+                <label className="field">
+                  <span className="field-label">SSH-brukernavn</span>
+                  <input
+                    type="text"
+                    value={form.sshUser}
+                    onChange={(e) => set('sshUser', e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </label>
+                <label className="field">
+                  <span className="field-label">SSH-passord</span>
+                  <input
+                    type="password"
+                    value={form.sshPassword}
+                    onChange={(e) => set('sshPassword', e.target.value)}
+                    placeholder={existing?.hasSshPassword ? 'Uendret' : ''}
+                    autoComplete="new-password"
+                  />
+                </label>
+              </div>
+              <label className="field">
+                <span className="field-label">Privat nøkkel, i stedet for passord</span>
+                <textarea
+                  value={form.sshKey}
+                  onChange={(e) => set('sshKey', e.target.value)}
+                  placeholder={existing?.hasSshKey ? 'Uendret' : '-----BEGIN OPENSSH PRIVATE KEY-----'}
+                  rows={3}
+                  spellCheck={false}
+                />
+                <span className="hint">Nøkkelen kan ikke ha passordfrase.</span>
+              </label>
+              <label className="field">
+                <span className="field-label">Mappen med torrentfilene</span>
+                <input
+                  type="text"
+                  value={form.torrentDir}
+                  onChange={(e) => set('torrentDir', e.target.value)}
+                  placeholder={kind?.torrentDirHint}
+                  spellCheck={false}
+                />
+                <span className="hint">
+                  Relativt til hjemmemappen, eller full sti. For {kind?.label} er det vanligvis {kind?.torrentDirHint}.
+                  Har du flere instanser på samme server, har hver sin mappe.
+                </span>
+              </label>
+              {storedFingerprint && !pinKey && <p className="hint">Lagret servernøkkel: {storedFingerprint}</p>}
+              {pinKey?.replace && <p className="hint">Ny servernøkkel lagres når du lagrer: {pinKey.fingerprint}</p>}
+            </details>
+          )}
+
           <div className="dialog-status" aria-live="polite">
             {test?.ok && (
               <p className="status-ok">
@@ -256,6 +421,7 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
             {test && !test.ok && (
               <p className="status-bad">{connectionProblem(test.errorCode, kind?.label ?? '', test.error)}</p>
             )}
+            {test?.ssh && sshStatus(test.ssh)}
             {error && <p className="status-bad">{error}</p>}
           </div>
 

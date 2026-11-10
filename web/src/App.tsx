@@ -1,13 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
-import type { InstanceConfig, InstanceStatus, KindInfo, Snapshot, State, Torrent } from './types';
+import type { InstanceConfig, InstanceStatus, KindInfo, Snapshot, State, Torrent, TransferJob } from './types';
 import { count, rate } from './format';
 import { connectionProblem } from './text';
 import { InstanceDialog } from './components/InstanceDialog';
+import { MoveDialog } from './components/MoveDialog';
+import { TransferPanel } from './components/TransferPanel';
 import { Sidebar, type StateFilter } from './components/Sidebar';
 import { TorrentTable, torrentKey, type Sort, type SortKey } from './components/TorrentTable';
 
 const POLL_MS = 3000;
+const TRANSFER_POLL_MS = 1200;
+const DISMISSED_KEY = 'stim.dismissedTransfers';
+
+function loadDismissed(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? '[]') as string[]);
+  } catch {
+    return new Set();
+  }
+}
 const INSTANCE_COLORS = 6; // --inst-0 … --inst-5 in styles.css
 
 type DialogState = { existing: InstanceConfig | null } | null;
@@ -26,6 +38,9 @@ export default function App() {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [notice, setNotice] = useState<{ text: string; bad?: boolean } | null>(null);
   const [acting, setActing] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [jobs, setJobs] = useState<TransferJob[]>([]);
+  const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
   const lastClicked = useRef<string | null>(null);
 
   // --- data -----------------------------------------------------------
@@ -61,6 +76,48 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refresh]);
+
+  // Moves: poll quickly while one is running, otherwise along with the list.
+  const loadJobs = useCallback(async () => {
+    try {
+      setJobs(await api.transfers());
+    } catch {
+      // The banner for the main list already reports an unreachable server.
+    }
+  }, []);
+  const anyRunning = jobs.some((j) => j.finishedAt === 0);
+  useEffect(() => {
+    loadJobs();
+    const timer = window.setInterval(loadJobs, anyRunning ? TRANSFER_POLL_MS : POLL_MS * 4);
+    return () => window.clearInterval(timer);
+  }, [loadJobs, anyRunning]);
+  // Show the result of a finished move in the list right away.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !anyRunning) refresh();
+    wasRunning.current = anyRunning;
+  }, [anyRunning, refresh]);
+
+  const dismissJob = (id: string) =>
+    setDismissed((prev) => {
+      const next = new Set(prev).add(id);
+      try {
+        localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next].slice(-50)));
+      } catch {
+        // Storage can be unavailable; the job then reappears after a reload.
+      }
+      return next;
+    });
+  const visibleJobs = jobs.filter((j) => j.finishedAt === 0 || !dismissed.has(j.id));
+
+  const cancelJob = async (id: string) => {
+    try {
+      await api.cancelTransfer(id);
+      await loadJobs();
+    } catch (e) {
+      setNotice({ text: (e as Error).message, bad: true });
+    }
+  };
 
   useEffect(() => {
     if (!notice) return;
@@ -222,6 +279,7 @@ export default function App() {
   // --- clients ----------------------------------------------------------
 
   const closeDialog = useCallback(() => setDialog(null), []);
+  const closeMove = useCallback(() => setMoveOpen(false), []);
 
   const openEdit = async (id: string) => {
     try {
@@ -284,6 +342,14 @@ export default function App() {
           </p>
         ))}
 
+        <TransferPanel
+          jobs={visibleJobs}
+          instances={instances}
+          colorOf={colorOf}
+          onCancel={cancelJob}
+          onDismiss={dismissJob}
+        />
+
         <div className="toolbar">
           <input
             type="search"
@@ -309,6 +375,15 @@ export default function App() {
               disabled={selectedTorrents.length === 0 || acting}
             >
               Gjenoppta
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setMoveOpen(true)}
+              disabled={selectedTorrents.length === 0 || instances.length < 2}
+              title={instances.length < 2 ? 'Legg til en klient til for å kunne flytte' : undefined}
+            >
+              Flytt til …
             </button>
           </div>
           <p className="toolbar-count" aria-live="polite">
@@ -388,6 +463,25 @@ export default function App() {
             setDialog(null);
             setNotice({ text });
             refresh();
+          }}
+        />
+      )}
+
+      {moveOpen && (
+        <MoveDialog
+          kinds={kinds}
+          instances={instances}
+          colorOf={colorOf}
+          torrents={selectedTorrents}
+          onClose={closeMove}
+          onStarted={(job) => {
+            setMoveOpen(false);
+            setSelected(new Set());
+            setJobs((prev) => [job, ...prev.filter((j) => j.id !== job.id)]);
+          }}
+          onEditInstance={(id) => {
+            setMoveOpen(false);
+            openEdit(id);
           }}
         />
       )}

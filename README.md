@@ -21,6 +21,7 @@ Tidlig skjelett. Dette fungerer:
 - legge til, endre og fjerne klienter, med tilkoblingstest
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
 - pause og gjenoppta, også på tvers av klienter i samme operasjon
+- flytte torrenter mellom klienter på samme server, med valgfri flytting av filene til en ny mappe
 
 Dette mangler foreløpig: legge til og slette torrenter, detaljvisning (filer, trackere,
 peers), endre etikett/kategori, og **innlogging**.
@@ -48,9 +49,43 @@ docker compose up -d --build
 - **Seedboks bak HTTP-innlogging** (nettleseren spør om brukernavn/passord før du ser klienten):
   fyll ut HTTP-brukernavn og -passord under «Bak revers proxy eller med selvsignert sertifikat».
 
+## Flytte torrenter mellom klienter
+
+Velg torrenter, trykk **Flytt til …** og velg målklient. Stim flytter én torrent av gangen:
+
+1. henter `.torrent`-filen fra kildeklienten og sjekker at den hører til riktig torrent
+2. legger den til **stoppet** i målklienten, pekt på filene der de ligger
+3. lar målklienten sjekke filene, og krever at den finner 100 %
+4. fjerner torrenten fra kildeklienten, **alltid uten å slette data** (kan slås av, så begge seeder)
+5. starter den i målklienten, og flytter eventuelt filene til en ny mappe
+
+Finner ikke målklienten alle filene, eller du avbryter før steg 4, fjernes kopien fra målklienten igjen og
+kilden er urørt. Kategori/etikett og tagger følger med der målklienten støtter det. Ufullstendige torrenter
+hoppes over.
+
+Begge klientene må se filene på **samme sti**. Det gjelder for klienter som kjører som samme bruker på
+samme server, slik som på en seedboks. Kjører en av dem i Docker med andre mount-punkter, vil sjekken i
+steg 3 feile, og ingenting blir endret.
+
+### Fra Deluge: SSH-tilgang
+
+qBittorrent gir fra seg `.torrent`-filen over API-et (4.5 og nyere). Deluge gjør ikke det, så for å flytte
+**fra** Deluge henter Stim filen fra Deluges `state`-mappe på serveren over SFTP. Fyll inn under
+**Endre → SSH-tilgang** på Deluge-klienten:
+
+- **SSH-vert, port, brukernavn** og enten **passord** eller **privat nøkkel** (uten passordfrase)
+- **Mappen med torrentfilene**, vanligvis `.config/deluge/state` relativt til hjemmemappen. Har du flere
+  Deluge-instanser på samme server, har hver sin mappe.
+
+«Test tilkobling» viser hvor mange torrentfiler Stim fant, og serverens SSH-nøkkel. Nøkkelen lagres, og
+endres den senere, nekter Stim å koble til til du har godtatt den nye under Endre.
+
+Stim leser bare `.torrent`-filer over SFTP, men SSH-innloggingen gir full tilgang til kontoen på serveren,
+og den lagres i klartekst i `config/instances.json`. Bruk gjerne en egen nøkkel kun for Stim.
+
 ## Kjøre uten Docker
 
-Stim er én binærfil med webgrensesnittet innebygd. Krever Go 1.24+ og Node 22+ for å bygge.
+Stim er én binærfil med webgrensesnittet innebygd. Krever Go 1.26+ og Node 22+ for å bygge.
 
 ```sh
 make build
@@ -82,6 +117,9 @@ internal/client/          felles modell + Client-grensesnittet alle adaptere imp
 internal/client/qbittorrent/
 internal/client/deluge/
 internal/store/           klientoppsettet (instances.json)
+internal/transfer/        flytting mellom klienter (jobber, tilbakerulling)
+internal/torrentfile/     leser .torrent-filer uten å endre info-hashen
+internal/remotefiles/     henter filer over SFTP
 internal/manager/         én levende klient per instans, samlet og kort mellomlagret visning
 internal/api/             HTTP-API + servering av webgrensesnittet
 internal/webui/           innebygd frontend-build
@@ -92,6 +130,8 @@ web/                      React + Vite + TypeScript
 
 1. Lag en pakke under `internal/client/<navn>/` som implementerer `client.Client`
    (`Version`, `Torrents`, `Pause`, `Resume`) og oversetter klientens tilstander til `client.State`.
+   For flytting implementerer den også `client.Transferer`, og `client.Exporter` hvis API-et kan gi fra
+   seg `.torrent`-filer.
 2. Registrer den i pakkens `init()` med `client.Register(...)`. `client.Info` forteller
    webgrensesnittet hva skjemaet skal vise (trengs brukernavn, eksempel-URL, støtte for etiketter/tagger).
 3. Importer pakken i `cmd/stim/main.go`.
@@ -111,6 +151,9 @@ Webgrensesnittet henter klienttypene fra `/api/kinds` og trenger ingen endringer
 | `POST` | `/api/instances/{id}/retry` | prøv igjen etter avvist innlogging |
 | `GET` | `/api/torrents` | status per klient + alle torrenter |
 | `POST` | `/api/torrents/action` | `{"action": "pause" \| "resume", "items": [{"instanceId", "hash"}]}` |
+| `GET` | `/api/transfers` | flyttejobber, nyeste først |
+| `POST` | `/api/transfers` | `{"targetId", "removeFromSource", "newPath", "items": [{"instanceId", "hash"}]}` |
+| `POST` | `/api/transfers/{id}/cancel` | avbryt en flyttejobb |
 
 ## Kjente begrensninger
 
