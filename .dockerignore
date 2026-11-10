@@ -1,0 +1,6 @@
+.git
+config
+web/node_modules
+internal/webui/dist
+bin
+stim

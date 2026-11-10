@@ -1,0 +1,13 @@
+# Frontend dependencies and build output (the build is embedded into the binary)
+web/node_modules/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
+
+# Local runtime data: holds client passwords, never commit
+/config/
+
+# Build artefacts
+/stim
+/bin/
+*.exe
+.DS_Store

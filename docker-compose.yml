@@ -1,0 +1,15 @@
+services:
+  stim:
+    build: .
+    container_name: stim
+    restart: unless-stopped
+    # Stim has no login of its own yet. Keep this port on your LAN, or drop
+    # the mapping and reach Stim through a reverse proxy with authentication.
+    ports:
+      - "7846:7846"
+    volumes:
+      # instances.json lives here and holds your client passwords.
+      - ./config:/config
+    # The container runs as UID 1000. Change this if ./config is owned by
+    # someone else on the host.
+    user: "1000:1000"
