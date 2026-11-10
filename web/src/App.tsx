@@ -6,25 +6,37 @@ import { connectionProblem } from './text';
 import { InstanceDialog } from './components/InstanceDialog';
 import { MoveDialog } from './components/MoveDialog';
 import { TransferPanel } from './components/TransferPanel';
-import { Sidebar, type StateFilter } from './components/Sidebar';
+import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
 import { TorrentTable, torrentKey, type Sort, type SortKey } from './components/TorrentTable';
 
 const POLL_MS = 3000;
 const TRANSFER_POLL_MS = 1200;
 const DISMISSED_KEY = 'stim.dismissedTransfers';
+const HIDDEN_TRACKERS_KEY = 'stim.hiddenTrackers';
 
-function loadDismissed(): Set<string> {
+// Small per-browser settings. Storage can be unavailable or hold junk, so
+// both directions fail quietly.
+function loadSet(key: string): Set<string> {
   try {
-    return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? '[]') as string[]);
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? '[]');
+    return new Set(Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
   } catch {
     return new Set();
+  }
+}
+
+function saveSet(key: string, set: Set<string>, keep = Infinity) {
+  try {
+    localStorage.setItem(key, JSON.stringify([...set].slice(-keep)));
+  } catch {
+    // Not saved; the choice still applies until the page is reloaded.
   }
 }
 const INSTANCE_COLORS = 6; // --inst-0 … --inst-5 in styles.css
 
 type DialogState = { existing: InstanceConfig | null } | null;
 
-const TEXT_KEYS: SortKey[] = ['name', 'instance', 'state', 'label'];
+const TEXT_KEYS: SortKey[] = ['name', 'instance', 'state', 'label', 'tracker'];
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -40,7 +52,11 @@ export default function App() {
   const [acting, setActing] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [jobs, setJobs] = useState<TransferJob[]>([]);
-  const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
+  const [dismissed, setDismissed] = useState<Set<string>>(() => loadSet(DISMISSED_KEY));
+  // Trackers the user has unticked. Storing the hidden ones (rather than the
+  // shown ones) means a tracker that appears later is shown, not silently
+  // filtered out.
+  const [hiddenTrackers, setHiddenTrackers] = useState<Set<string>>(() => loadSet(HIDDEN_TRACKERS_KEY));
   const lastClicked = useRef<string | null>(null);
 
   // --- data -----------------------------------------------------------
@@ -101,13 +117,26 @@ export default function App() {
   const dismissJob = (id: string) =>
     setDismissed((prev) => {
       const next = new Set(prev).add(id);
-      try {
-        localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next].slice(-50)));
-      } catch {
-        // Storage can be unavailable; the job then reappears after a reload.
-      }
+      saveSet(DISMISSED_KEY, next, 50);
       return next;
     });
+
+  const updateHiddenTrackers = (update: (prev: Set<string>) => Set<string>) =>
+    setHiddenTrackers((prev) => {
+      const next = update(prev);
+      saveSet(HIDDEN_TRACKERS_KEY, next);
+      return next;
+    });
+  const toggleTracker = (name: string) =>
+    updateHiddenTrackers((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  const onlyTracker = (name: string) =>
+    updateHiddenTrackers(() => new Set(torrents.map((t) => t.tracker).filter((t) => t !== name)));
+  const showAllTrackers = () => updateHiddenTrackers(() => new Set());
   const visibleJobs = jobs.filter((j) => j.finishedAt === 0 || !dismissed.has(j.id));
 
   const cancelJob = async (id: string) => {
@@ -148,9 +177,31 @@ export default function App() {
     [torrents, instanceFilter],
   );
 
+  // Tracker counts follow the client filter but not the tracker filter
+  // itself, so an unticked tracker still shows how many torrents it has.
+  const trackerCounts = useMemo((): TrackerCount[] => {
+    const counts = new Map<string, number>();
+    for (const t of inInstance) counts.set(t.tracker, (counts.get(t.tracker) ?? 0) + 1);
+    // Keep an unticked tracker in the list, so it can be ticked again, as long
+    // as some client still has it.
+    const known = new Set(torrents.map((t) => t.tracker));
+    for (const h of hiddenTrackers) if (known.has(h) && !counts.has(h)) counts.set(h, 0);
+    return [...counts]
+      .map(([name, n]) => ({ name, count: n }))
+      .sort(
+        (a, b) =>
+          Number(a.name === '') - Number(b.name === '') || b.count - a.count || a.name.localeCompare(b.name),
+      );
+  }, [inInstance, torrents, hiddenTrackers]);
+
+  const inTracker = useMemo(
+    () => (hiddenTrackers.size === 0 ? inInstance : inInstance.filter((t) => !hiddenTrackers.has(t.tracker))),
+    [inInstance, hiddenTrackers],
+  );
+
   const stateCounts = useMemo(() => {
     const counts = {
-      all: inInstance.length,
+      all: inTracker.length,
       active: 0,
       downloading: 0,
       seeding: 0,
@@ -161,16 +212,16 @@ export default function App() {
       error: 0,
       unknown: 0,
     } satisfies Record<StateFilter, number>;
-    for (const t of inInstance) {
+    for (const t of inTracker) {
       counts[t.state]++;
       if (t.downloadRate > 0 || t.uploadRate > 0) counts.active++;
     }
     return counts;
-  }, [inInstance]);
+  }, [inTracker]);
 
   const visible = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const list = inInstance.filter((t) => {
+    const list = inTracker.filter((t) => {
       if (stateFilter === 'active') {
         if (t.downloadRate <= 0 && t.uploadRate <= 0) return false;
       } else if (stateFilter !== 'all' && t.state !== stateFilter) {
@@ -203,7 +254,7 @@ export default function App() {
           : va - vb;
       return cmp !== 0 ? cmp * dir : collator.compare(a.name, b.name) || a.hash.localeCompare(b.hash);
     });
-  }, [inInstance, stateFilter, query, sort, instanceById]);
+  }, [inTracker, stateFilter, query, sort, instanceById]);
 
   const onSort = (key: SortKey) =>
     setSort((s) =>
@@ -311,6 +362,11 @@ export default function App() {
         onStateFilter={(s: State | 'all' | 'active') => setStateFilter(s)}
         onAdd={() => setDialog({ existing: null })}
         onEdit={openEdit}
+        trackers={trackerCounts}
+        hiddenTrackers={hiddenTrackers}
+        onToggleTracker={toggleTracker}
+        onOnlyTracker={onlyTracker}
+        onShowAllTrackers={showAllTrackers}
       />
 
       <main className="main">
@@ -431,6 +487,7 @@ export default function App() {
                   className="btn"
                   onClick={() => {
                     setQuery('');
+                    showAllTrackers();
                     setStateFilter('all');
                     setInstanceFilter('all');
                   }}

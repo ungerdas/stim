@@ -3,11 +3,14 @@ package client
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 // NewHTTPClient returns an http.Client with a cookie jar (both qBittorrent and
@@ -37,14 +40,33 @@ func BaseURL(raw string) (string, error) {
 	return strings.TrimRight(raw, "/"), nil
 }
 
-// TrackerHost reduces a tracker announce URL to its host name.
-func TrackerHost(announce string) string {
-	if announce == "" {
+// TrackerDomain reduces a tracker announce URL, or a bare host name, to the
+// site it belongs to: "https://tracker.example.org:443/a/announce" and
+// "example.org" both become "example.org". Clients report trackers at
+// different levels of detail (qBittorrent the full URL, Deluge a shortened
+// host), and this makes them group together. IP addresses and single-label
+// hosts are returned as they are.
+func TrackerDomain(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
 		return ""
 	}
-	u, err := url.Parse(announce)
-	if err != nil || u.Hostname() == "" {
-		return announce
+	host := s
+	if strings.Contains(s, "://") {
+		u, err := url.Parse(s)
+		if err != nil || u.Hostname() == "" {
+			return s
+		}
+		host = u.Hostname()
+	} else if h, _, err := net.SplitHostPort(s); err == nil {
+		host = h
 	}
-	return u.Hostname()
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if net.ParseIP(host) != nil || !strings.Contains(host, ".") {
+		return host
+	}
+	if domain, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil {
+		return domain
+	}
+	return host
 }

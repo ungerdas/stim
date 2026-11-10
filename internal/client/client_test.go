@@ -45,11 +45,24 @@ func TestBaseURL(t *testing.T) {
 	}
 }
 
-func TestTrackerHost(t *testing.T) {
-	if got := TrackerHost("https://tracker.example.org:443/abc/announce"); got != "tracker.example.org" {
-		t.Errorf("got %q", got)
+func TestTrackerDomain(t *testing.T) {
+	cases := map[string]string{
+		"": "",
+		"https://tracker.example.org:443/a/announce": "example.org",
+		"http://norbits.net/announce.php?passkey=x":  "norbits.net",
+		"example.org":                                "example.org",
+		"tracker.example.invalid":                    "example.invalid",
+		"udp://tracker.opentrackr.org:1337/announce": "opentrackr.org",
+		"http://tracker.example.co.uk/announce":      "example.co.uk",
+		"http://10.0.0.2:6969/announce":              "10.0.0.2",
+		"10.0.0.2":                                   "10.0.0.2",
+		"http://[2001:db8::1]:6969/announce":         "2001:db8::1",
+		"http://localhost:6969/announce":             "localhost",
+		"Tracker.Example.ORG.":                       "example.org",
 	}
-	if got := TrackerHost(""); got != "" {
-		t.Errorf("got %q", got)
+	for in, want := range cases {
+		if got := TrackerDomain(in); got != want {
+			t.Errorf("TrackerDomain(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

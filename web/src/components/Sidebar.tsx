@@ -16,7 +16,20 @@ interface Props {
   onStateFilter: (s: StateFilter) => void;
   onAdd: () => void;
   onEdit: (id: string) => void;
+  trackers: TrackerCount[];
+  hiddenTrackers: Set<string>;
+  onToggleTracker: (tracker: string) => void;
+  onOnlyTracker: (tracker: string) => void;
+  onShowAllTrackers: () => void;
 }
+
+export interface TrackerCount {
+  /** The tracker's site, e.g. "norbits.net"; empty for torrents without one. */
+  name: string;
+  count: number;
+}
+
+export const trackerLabel = (name: string) => name || 'Uten tracker';
 
 // Always shown, then any other state that currently has torrents.
 const FIXED_STATES: StateFilter[] = ['all', 'active', 'downloading', 'seeding', 'paused', 'error'];
@@ -126,6 +139,50 @@ export function Sidebar(props: Props) {
           ))}
         </ul>
       </nav>
+
+      {props.trackers.length > 0 && (
+        <section className="side-section" aria-labelledby="side-trackers">
+          <div className="side-heading-row">
+            <h2 id="side-trackers" className="side-heading">
+              Trackere
+            </h2>
+            {props.hiddenTrackers.size > 0 && (
+              <button type="button" className="side-heading-action" onClick={props.onShowAllTrackers}>
+                Vis alle
+              </button>
+            )}
+          </div>
+          <ul className="side-list">
+            {props.trackers.map((t) => {
+              const shown = !props.hiddenTrackers.has(t.name);
+              const label = trackerLabel(t.name);
+              return (
+                <li key={t.name} className="side-row">
+                  <label className={`side-item side-check${shown ? '' : ' is-hidden'}`}>
+                    <input type="checkbox" checked={shown} onChange={() => props.onToggleTracker(t.name)} />
+                    <span className="side-item-main">
+                      <span className="side-item-name" title={label}>
+                        {label}
+                      </span>
+                    </span>
+                    <span className="side-count">{count(t.count)}</span>
+                  </label>
+                  {props.trackers.length > 1 && (
+                    <button
+                      type="button"
+                      className="side-edit side-only"
+                      onClick={() => props.onOnlyTracker(t.name)}
+                      aria-label={`Vis bare ${label}`}
+                    >
+                      Bare denne
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
     </aside>
   );
 }

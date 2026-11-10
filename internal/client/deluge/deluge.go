@@ -319,7 +319,7 @@ func (t apiTorrent) toTorrent(hash string) client.Torrent {
 		Peers:        int(t.NumPeers),
 		Label:        t.Label,
 		Tags:         []string{},
-		Tracker:      t.TrackerHost,
+		Tracker:      client.TrackerDomain(t.TrackerHost),
 		SavePath:     path,
 		AddedAt:      int64(t.TimeAdded),
 		CompletedAt:  completed,

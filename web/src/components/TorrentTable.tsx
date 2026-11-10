@@ -15,6 +15,7 @@ export type SortKey =
   | 'ratio'
   | 'eta'
   | 'label'
+  | 'tracker'
   | 'addedAt';
 
 export interface Sort {
@@ -40,6 +41,7 @@ const COLUMNS: Column[] = [
   { key: 'ratio', title: 'Ratio', className: 'col-ratio', numeric: true },
   { key: 'eta', title: 'Gjenstår', className: 'col-eta', numeric: true },
   { key: 'label', title: 'Etikett', className: 'col-label' },
+  { key: 'tracker', title: 'Tracker', className: 'col-tracker' },
   { key: 'addedAt', title: 'Lagt til', className: 'col-added', numeric: true },
 ];
 
@@ -233,6 +235,9 @@ const Row = memo(function Row({ torrent: t, rowKey, index, top, height, instance
       </div>
       <div className="cell col-label" role="gridcell" title={labelText}>
         <span className="ellipsis">{labelText}</span>
+      </div>
+      <div className="cell col-tracker" role="gridcell" title={t.tracker}>
+        <span className="ellipsis">{t.tracker}</span>
       </div>
       <div className="cell col-added is-numeric" role="gridcell">
         {date(t.addedAt)}

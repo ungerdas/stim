@@ -4,7 +4,6 @@ package qbittorrent
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +35,10 @@ type Client struct {
 	base string
 	cfg  client.Config
 	http *http.Client
+
+	// syncMu serialises Torrents calls, which share the sync state.
+	syncMu sync.Mutex
+	sync   syncState
 
 	mu sync.Mutex
 	// qBittorrent 5 renamed pause/resume to stop/start. Once we know which
@@ -202,22 +205,6 @@ type apiTorrent struct {
 // etaInfinity is the value qBittorrent reports when it has no estimate.
 const etaInfinity = 8640000
 
-func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
-	body, err := c.get(ctx, "/api/v2/torrents/info")
-	if err != nil {
-		return nil, err
-	}
-	var raw []apiTorrent
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, errNotQBittorrent
-	}
-	out := make([]client.Torrent, 0, len(raw))
-	for _, t := range raw {
-		out = append(out, t.toTorrent())
-	}
-	return out, nil
-}
-
 func (t apiTorrent) toTorrent() client.Torrent {
 	eta := t.ETA
 	if eta >= etaInfinity || eta < 0 {
@@ -244,7 +231,7 @@ func (t apiTorrent) toTorrent() client.Torrent {
 		Peers:        t.NumLeechs,
 		Label:        t.Category,
 		Tags:         splitTags(t.Tags),
-		Tracker:      client.TrackerHost(t.Tracker),
+		Tracker:      client.TrackerDomain(t.Tracker),
 		SavePath:     t.SavePath,
 		AddedAt:      t.AddedOn,
 		CompletedAt:  completed,

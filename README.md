@@ -20,6 +20,7 @@ Tidlig skjelett. Dette fungerer:
 
 - legge til, endre og fjerne klienter, med tilkoblingstest
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
+- trackerfilter: huk av hvilke trackere som skal vises (valget huskes i nettleseren)
 - pause og gjenoppta, også på tvers av klienter i samme operasjon
 - flytte torrenter mellom klienter på samme server, med valgfri flytting av filene til en ny mappe
 
@@ -157,11 +158,11 @@ Webgrensesnittet henter klienttypene fra `/api/kinds` og trenger ingen endringer
 
 ## Kjente begrensninger
 
-- Hele torrentlisten hentes fra hver klient ved hver oppdatering (mellomlagret i 2 sekunder).
-  Det holder for noen tusen torrenter; inkrementell synk (`sync/maindata` i qBittorrent,
-  `web.update_ui` i Deluge) er neste steg for store samlinger.
+- qBittorrent synkroniseres inkrementelt (`sync/maindata`), så bare endringer hentes. Fra Deluge
+  hentes hele listen ved hver oppdatering (mellomlagret i 2 sekunder), noe som holder for noen
+  tusen torrenter.
 - Etter et avvist passord slutter Stim å prøve på egen hånd, fordi qBittorrent sperrer
   adresser etter noen få mislykkede innlogginger. Lagre klienten på nytt eller velg «prøv igjen».
-- Deluge oppgir tracker som domene (`example.org`), qBittorrent som fullt vertsnavn
-  (`tracker.example.org`).
+- Trackere vises som nettstedets domene (`tracker.example.org` blir `example.org`), slik at samme
+  tracker grupperes likt fra qBittorrent og Deluge. Har en torrent flere trackere, vises én av dem.
 - Deluge 1.x er forsøkt støttet (egne metodenavn for pause/gjenoppta), men ikke testet.

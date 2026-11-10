@@ -49,7 +49,7 @@ type Torrent struct {
 	Peers        int      `json:"peers"` // connected
 	Label        string   `json:"label"` // qBittorrent category / Deluge label
 	Tags         []string `json:"tags"`
-	Tracker      string   `json:"tracker"` // tracker host
+	Tracker      string   `json:"tracker"` // tracker site, see TrackerDomain
 	SavePath     string   `json:"savePath"`
 	AddedAt      int64    `json:"addedAt"`
 	CompletedAt  int64    `json:"completedAt"` // 0 when not completed

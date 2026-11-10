@@ -46,8 +46,8 @@
   /* Column tracks and their summed minimum width. Rows are absolutely
      positioned for virtual scrolling, so every row must resolve the same
      tracks: the minimum is fixed here instead of derived from content. */
-  --cols: 40px minmax(380px, 1fr) 150px 112px 120px 84px 92px 92px 56px 84px 124px 118px;
-  --table-min: 1452px;
+  --cols: 40px minmax(380px, 1fr) 150px 112px 120px 84px 92px 92px 56px 84px 124px 130px 118px;
+  --table-min: 1582px;
 }
 
 *,
@@ -232,6 +232,35 @@ input[type='radio'] {
 .side-item-problem {
   color: var(--bad);
   font-weight: 600;
+}
+
+.side-heading-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-right: 8px;
+}
+
+.side-heading-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.side-check {
+  cursor: pointer;
+}
+
+.side-check.is-hidden .side-item-name,
+.side-check.is-hidden .side-count {
+  color: var(--ink-soft);
+  opacity: 0.6;
 }
 
 .side-count {
@@ -726,6 +755,7 @@ input[type='radio'] {
 }
 
 .col-label,
+.col-tracker,
 .col-added {
   color: var(--ink-soft);
 }
@@ -745,10 +775,10 @@ input[type='radio'] {
   container-type: inline-size;
 }
 
-@container (max-width: 1452px) {
+@container (max-width: 1582px) {
   .table {
-    --cols: 40px minmax(300px, 1fr) 140px 112px 112px 84px 92px 92px 56px 84px;
-    --table-min: 1112px;
+    --cols: 40px minmax(220px, 1fr) 140px 112px 112px 84px 92px 92px 56px 84px 130px;
+    --table-min: 1162px;
   }
   .col-label,
   .col-added {
@@ -756,14 +786,15 @@ input[type='radio'] {
   }
 }
 
-@container (max-width: 1112px) {
+@container (max-width: 1162px) {
   .table {
     --cols: 40px minmax(200px, 1fr) 116px 112px 112px 92px 92px;
     --table-min: 764px;
   }
   .col-size,
   .col-ratio,
-  .col-eta {
+  .col-eta,
+  .col-tracker {
     display: none;
   }
 }
@@ -1144,6 +1175,16 @@ input[type='radio'] {
   .side-row {
     display: flex;
     gap: 4px;
+  }
+
+  /* No hover on touch screens: the trackers are plain toggles there. */
+  .side-only {
+    display: none;
+  }
+
+  /* The heading is visually hidden here; only "Vis alle" takes up room. */
+  .side-heading-row {
+    display: contents;
   }
 
   .side-edit {
