@@ -13,3 +13,6 @@ services:
     # The container runs as UID 1000. Change this if ./config is owned by
     # someone else on the host.
     user: "1000:1000"
+    # The image is built locally, so there is nothing for Watchtower to pull.
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
