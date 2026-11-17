@@ -74,7 +74,11 @@ Velg torrenter, trykk **Flytt til …** og velg målklient. Stim flytter én tor
 5. starter den i målklienten, og flytter eventuelt filene til en ny mappe
 
 Finner ikke målklienten alle filene, eller du avbryter før steg 4, fjernes kopien fra målklienten igjen og
-kilden er urørt. Kategori/etikett og tagger følger med der målklienten støtter det. Ufullstendige torrenter
+kilden er urørt.
+
+Bruker andre torrenter de samme filene, for eksempel samme utgivelse på flere trackere, flytter Stim bare den
+torrenten du valgte. De andre seeder videre som før. Med «Flytt filene til en annen mappe» blir filene i så
+fall liggende der de er, så de andre ikke mister dem, og fremdriftslisten sier fra. Kategori/etikett og tagger følger med der målklienten støtter det. Ufullstendige torrenter
 hoppes over.
 
 Under **Filene** velger du om klientene deler disk:
@@ -98,7 +102,9 @@ målklienten peker på kopien. Mappen er forhåndsutfylt med målklientens stand
 - Stim sjekker at hver fil finnes med riktig størrelse, og at det er plass på målserveren (med 256 MiB
   til overs), før kopieringen starter. Filer skrives som `navn.stimpart` og får riktig navn når de er
   ferdige. Filer som allerede ligger der med riktig størrelse, kopieres ikke på nytt; målklientens sjekk i
-  steg 3 avgjør om de er like.
+  steg 3 avgjør om de er like. Flytter du flere utgaver av samme utgivelse til samme mappe, kopieres filene
+  altså bare én gang. Ligger det en annen fil med samme navn og annen størrelse der, stopper Stim i stedet
+  for å skrive over den.
 - Feiler sjekken, eller du avbryter, slettes det Stim kopierte (og mappene Stim laget) igjen, og kilden er
   urørt. Ryker forbindelsen midt i en torrent med flere filer, beholdes de ferdige filene, så neste forsøk
   fortsetter der.

@@ -375,3 +375,24 @@ func TestRollbackUsesTargetID(t *testing.T) {
 		t.Errorf("got %+v; target still has copy: %v", it, dst.has(tf.InfoHashes()[1]))
 	}
 }
+
+func TestNewFolderLeavesCrossSeededFiles(t *testing.T) {
+	e, src, dst, hash := setup(t)
+	// The same files on another tracker: another torrent, same folder and name.
+	src.torrents["other"] = client.Torrent{Hash: "other", Name: "a.mkv", SavePath: "/data"}
+	job, err := e.Start(request(hash, true, "/ssd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := wait(t, e, job.ID)
+	if it.State != StateDone || it.Note != NoteNotMovedShared || it.Shared != 1 {
+		t.Fatalf("got %+v", it)
+	}
+	got, _, _ := dst.Torrent(context.Background(), hash)
+	if got.SavePath != "/data" || got.State != client.StateSeeding {
+		t.Errorf("target torrent should seed from the old folder, got %+v", got)
+	}
+	if src.has(hash) || !src.has("other") {
+		t.Error("only the moved torrent should leave the source")
+	}
+}

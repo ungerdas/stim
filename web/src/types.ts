@@ -174,8 +174,13 @@ export interface TransferItem {
   copyTotal?: number;
   copyDone?: number;
   copyRate?: number;
-  /** Why the files on the old server were kept, when deleting them was asked for. */
-  note?: 'source-files-shared' | 'source-files-unchecked' | 'source-files-same';
+  /** Why the old files were kept or not moved, when that was asked for. */
+  note?:
+    | 'source-files-shared'
+    | 'source-files-unchecked'
+    | 'source-files-same'
+    | 'not-moved-shared'
+    | 'not-moved-unchecked';
   noteDetail?: string;
   shared?: number;
 }

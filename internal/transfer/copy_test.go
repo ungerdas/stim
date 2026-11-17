@@ -216,3 +216,25 @@ func TestCopyNoSpace(t *testing.T) {
 		t.Errorf("free = %d", free)
 	}
 }
+
+func TestCopyNeverOverwritesOtherFiles(t *testing.T) {
+	e, _, src, _, hash, dir := across(t)
+	target := filepath.Join(dir, "B")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "a.mkv"), []byte("another release"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	job, _ := e.Start(copyRequest(hash, target, true))
+	it := wait(t, e, job.ID)
+	if it.State != StateFailed || it.Code != CodeTargetExists {
+		t.Fatalf("got %+v", it)
+	}
+	if b, _ := os.ReadFile(filepath.Join(target, "a.mkv")); string(b) != "another release" {
+		t.Errorf("the existing file was changed: %q", b)
+	}
+	if !src.has(hash) {
+		t.Error("the source should be untouched")
+	}
+}

@@ -73,6 +73,8 @@ const transferProblems: Record<string, string> = {
   'source-file-missing': 'En fil mangler eller har feil størrelse på den gamle serveren. Ingenting er endret.',
   'no-space': 'Det er ikke nok ledig plass på den nye serveren. Ingenting er endret.',
   'copy-failed': 'Kopieringen feilet. Det som ble kopiert er slettet, og kilden er urørt.',
+  'target-file-exists':
+    'Det ligger allerede en annen fil med samme navn i mappen på den nye serveren. Stim skriver ikke over den. Velg en annen mappe.',
   'copy-interrupted':
     'Kopieringen stoppet underveis. Ferdige filer er beholdt på den nye serveren, så neste forsøk fortsetter der. Kilden er urørt.',
 };
@@ -82,7 +84,7 @@ const copyProblems: Record<string, string> = {
   'host-key-changed': 'En servers SSH-nøkkel er endret siden sist. Sjekk den under Endre på klienten.',
 };
 
-/** Why a finished move kept the files on the old server, if it did. */
+/** Why a finished move left the files where they were, if it did. */
 export function transferNote(item: TransferItem): string | null {
   switch (item.note) {
     case 'source-files-shared':
@@ -91,6 +93,10 @@ export function transferNote(item: TransferItem): string | null {
       return 'Filene på den gamle serveren er beholdt: Stim fikk ikke sjekket om andre torrenter der bruker dem.';
     case 'source-files-same':
       return 'Filene på den gamle serveren er beholdt fordi målklienten bruker de samme filene.';
+    case 'not-moved-shared':
+      return `Filene er ikke flyttet til den nye mappen fordi ${item.shared === 1 ? 'en annen torrent' : `${item.shared} andre torrenter`} bruker dem. Målklienten seeder fra der de lå.`;
+    case 'not-moved-unchecked':
+      return 'Filene er ikke flyttet til den nye mappen: Stim fikk ikke sjekket om andre torrenter bruker dem. Målklienten seeder fra der de lå.';
     default:
       return null;
   }

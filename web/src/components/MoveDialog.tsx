@@ -332,9 +332,11 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
                     spellCheck={false}
                     required
                   />
-                  {plan.paths.length > 0 && (
-                    <span className="hint">Ligger nå i {plan.paths.slice(0, 3).join(', ')}</span>
-                  )}
+                  <span className="hint">
+                    {plan.paths.length > 0 && `Ligger nå i ${plan.paths.slice(0, 3).join(', ')}. `}
+                    Filer som andre torrenter også bruker, for eksempel samme utgivelse på en annen tracker, blir
+                    liggende der de er.
+                  </span>
                 </label>
               )}
             </>

@@ -102,8 +102,20 @@ func (e *Engine) copyAcross(ctx context.Context, job *Job, i int, srcInst, dstIn
 		if sameServer && p.src == p.dst {
 			p.skip = true // the very same file
 			done.sameFiles = true
-		} else if n, err := dst.Size(p.dst); err == nil && n == p.size {
-			p.skip = true // already there, perhaps from an interrupted copy; the check verifies it
+		} else {
+			n, err := dst.Size(p.dst)
+			switch {
+			case err == nil && n == p.size:
+				// Already there: from an interrupted copy, or another torrent
+				// of the same files (a cross-seed moved earlier). The target
+				// client's check decides whether it really is the same.
+				p.skip = true
+			case err == nil:
+				// Never overwrite: another torrent may be seeding it.
+				return done, fail(CodeTargetExists, "%s already exists on the target server with another size (%d bytes, the torrent says %d)", p.dst, n, p.size)
+			case !remotefiles.IsNotExist(err):
+				return done, fail(CodeTargetExists, "%s cannot be written on the target server: %v", p.dst, err)
+			}
 		}
 		total += p.size
 		if !p.skip {
@@ -259,9 +271,12 @@ func overlaps(a, b string) bool {
 }
 
 // sharedFiles counts the other torrents, in any client on the source
-// server, whose files overlap the moved torrent's: cross-seeds, or a single
-// episode seeded from inside a season pack. Their data must stay.
-func (e *Engine) sharedFiles(ctx context.Context, srcInst store.Instance, t client.Torrent) (int, error) {
+// server, whose files overlap the moved torrent's: cross-seeds of the same
+// files on other trackers, or a single episode seeded from inside a season
+// pack. Their files must stay where they are. skip leaves out the moved
+// torrent's own entry in the target client, when the target is on the same
+// server.
+func (e *Engine) sharedFiles(ctx context.Context, srcInst store.Instance, t client.Torrent, skip func(instanceID, hash string) bool) (int, error) {
 	ids := []string{srcInst.ID}
 	if l, ok := e.clients.(lister); ok {
 		server := srcInst.Server()
@@ -289,6 +304,9 @@ func (e *Engine) sharedFiles(ctx context.Context, srcInst store.Instance, t clie
 		}
 		for _, o := range list {
 			if id == srcInst.ID && (strings.EqualFold(o.Hash, t.Hash) || (t.AltHash != "" && strings.EqualFold(o.Hash, t.AltHash))) {
+				continue
+			}
+			if skip != nil && skip(id, o.Hash) {
 				continue
 			}
 			if o.SavePath != "" && overlaps(path.Join(o.SavePath, o.Name), ours) {

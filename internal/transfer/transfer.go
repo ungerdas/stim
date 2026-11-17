@@ -74,6 +74,10 @@ const (
 	NoteShared    = "source-files-shared"    // other torrents there use them
 	NoteUnchecked = "source-files-unchecked" // could not check whether others use them
 	NoteSameFiles = "source-files-same"      // target uses the very same files
+
+	// Why the files were not moved to the new folder on the same server.
+	NoteNotMovedShared    = "not-moved-shared"    // other torrents there use them
+	NoteNotMovedUnchecked = "not-moved-unchecked" // could not check whether others use them
 )
 
 // Job is one "move these torrents to that client" request.
@@ -131,6 +135,7 @@ const (
 	CodeNoSpace           = "no-space"
 	CodeCopyFailed        = "copy-failed"
 	CodeCopyInterrupted   = "copy-interrupted" // finished files kept to resume from
+	CodeTargetExists      = "target-file-exists"
 	CodeOther             = "other"
 )
 
@@ -611,7 +616,7 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 		if job.DeleteSourceFiles {
 			n, err := 0, error(nil)
 			if !made.sameFiles {
-				n, err = e.sharedFiles(steady, srcInst, t)
+				n, err = e.sharedFiles(steady, srcInst, t, nil)
 			}
 			switch {
 			case made.sameFiles:
@@ -650,8 +655,22 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 		return sourceErr
 	}
 
-	// 7. Optionally let the target move the data to a new folder.
+	// 7. Optionally let the target move the data to a new folder, unless
+	// other torrents on the server use the same files (cross-seeds): moving
+	// them would leave those torrents without their data.
 	if job.NewPath != "" && !samePath(job.NewPath, t.SavePath) {
+		isTarget := func(id, h string) bool {
+			return id == job.TargetID && strings.EqualFold(h, dstHash)
+		}
+		n, err := e.sharedFiles(steady, srcInst, t, isTarget)
+		switch {
+		case err != nil:
+			e.update(job, i, func(it *Item) { it.Note, it.NoteDetail = NoteNotMovedUnchecked, err.Error() })
+			return nil
+		case n > 0:
+			e.update(job, i, func(it *Item) { it.Note, it.Shared = NoteNotMovedShared, n })
+			return nil
+		}
 		e.setState(job, i, StateMoving)
 		if err := e.relocate(steady, dst, dstHash, job.NewPath); err != nil {
 			return fail(CodeMoveFailed, "the target client has taken over, but moving the files to %s failed: %v", job.NewPath, err)
