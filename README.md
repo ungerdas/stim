@@ -24,6 +24,8 @@ Tidlig skjelett. Dette fungerer:
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
 - trackerfilter: huk av hvilke trackere som skal vises (valget huskes i nettleseren)
 - trackerfeil og avregistrerte torrenter: egne filtre, markering i listen og trackerens egen melding
+- søk på alle trackerne dine gjennom Prowlarr, og last ned rett til valgfri klient, med merking av det du
+  allerede har og forslag om å seede samme utgivelse fra filene du har
 - egen innstillingsside (tannhjulet ved navnet) for klienter, servere og visning, så forsiden bare har listen
 - ledig plass per klient under Innstillinger, og i sidemenyen når det er under 50 GiB igjen
 - filer uten torrent: finn og slett rester i nedlastingsmappene på en server (over SSH)
@@ -37,7 +39,8 @@ Tidlig skjelett. Dette fungerer:
 - flytte torrenter mellom klienter på samme server, med valgfri flytting av filene til en ny mappe
 - flytte torrenter mellom servere: Stim kopierer filene over SSH, og kan slette dem på den gamle serveren
 
-Dette mangler foreløpig: legge til torrenter, endre etikett/kategori, og **innlogging**.
+Dette mangler foreløpig: legge til egne .torrent-filer og magnetlenker (utenom søket), endre
+etikett/kategori, og **innlogging**.
 
 > **Ingen innlogging ennå.** Alle som når porten kan pause og gjenoppta torrenter og
 > endre klientoppsettet. Hold Stim på lokalnettet eller bak en revers proxy med
@@ -169,6 +172,35 @@ Over SFTP leser Stim `.torrent`-filer, og ved flytting mellom servere filene til
 Stim skriver bare til mappen du velger når du flytter, og sletter bare det Stim selv kopierte. Men
 SSH-innloggingen gir full tilgang til kontoen på serveren, og den lagres i klartekst i
 `config/instances.json`. Bruk gjerne en egen nøkkel kun for Stim.
+
+## Søk på trackerne
+
+**Søk på trackerne** øverst i sidemenyen (eller `/#sok`) søker i alle trackerne du har satt opp i
+[Prowlarr](https://prowlarr.com) samtidig. Prowlarr har innloggingene og vet hvordan hver tracker skal spørres;
+Stim logger ikke inn på trackerne selv.
+
+1. Under **Innstillinger → Søk på trackerne**: adressen til Prowlarr (for eksempel
+   `http://192.168.50.5:9696`) og API-nøkkelen fra Prowlarrs *Settings → General*. «Test tilkobling» viser
+   hvilke trackere Prowlarr har.
+2. Søk, velg trackere og eventuelt TV eller film. Treffene kan sorteres på seedere, størrelse, alder osv.
+3. **Last ned** henter `.torrent`-filen gjennom Prowlarr og legger den i klienten du velger, i mappen og
+   kategorien/etiketten du oppgir (tomt: klienten bestemmer selv).
+
+Treffene merkes:
+
+- **Har den:** akkurat denne torrenten ligger allerede i en klient (samme info-hash). Den klienten kan ikke
+  velges.
+- **Har utgivelsen:** samme utgivelse fra en annen tracker ligger i en klient (samme navn og omtrent samme
+  størrelse, som for kryss-seeds). Last ned-vinduet foreslår da den klienten og mappen der filene ligger, så
+  klienten sjekker dem og seeder uten å laste ned på nytt.
+- **Freeleech** når trackeren sier det.
+
+Prowlarrs nedlastingslenker inneholder API-nøkkelen, så de blir på Stim-serveren; nettleseren får bare en
+ID per treff, som gjelder i to timer. API-nøkkelen lagres i `config/instances.json` og sendes aldri til
+nettleseren.
+
+For rTorrent lager Stim mappen du velger først (gjennom rTorrent, eller over SSH bak ruTorrent), siden
+rTorrent ellers bare lager torrentens egen mappe og står stille hvis mappen over mangler.
 
 ## Trackerfeil og avregistrerte torrenter
 
@@ -302,6 +334,8 @@ internal/transfer/        flytting mellom klienter (jobber, tilbakerulling)
 internal/torrentfile/     leser .torrent-filer (info-hash, filliste) uten å endre dem
 internal/remotefiles/     filer over SFTP: lese, kopiere, liste, slette
 internal/orphans/         finner filer uten torrent
+internal/prowlarr/        søker og henter torrentfiler gjennom Prowlarr
+internal/search/          søk fra grensesnittet og nedlasting til en klient
 internal/manager/         én levende klient per instans, samlet og kort mellomlagret visning
 internal/api/             HTTP-API + servering av webgrensesnittet
 internal/webui/           innebygd frontend-build
@@ -338,6 +372,11 @@ Webgrensesnittet henter klienttypene fra `/api/kinds` og trenger ingen endringer
 | `GET` | `/api/details?instance=…&hash=…` | filer, trackere (passkeys maskert), peers og egenskaper for én torrent |
 | `POST` | `/api/orphans/scan` | `{"server"}`: filer uten torrent i serverens nedlastingsmapper |
 | `POST` | `/api/orphans/delete` | `{"server", "paths": []}`: sjekker på nytt og sletter det som fortsatt er rester |
+| `GET`/`PUT` | `/api/search/settings` | Prowlarr-adressen (nøkkelen vises aldri; utelatt nøkkel = behold) |
+| `POST` | `/api/search/test` | `{"prowlarrUrl", "apiKey"}`: test uten å lagre |
+| `GET` | `/api/search/indexers` | trackerne i Prowlarr |
+| `POST` | `/api/search` | `{"query", "indexerIds": [], "categories": []}` |
+| `POST` | `/api/search/grab` | `{"id", "instanceId", "savePath", "label", "paused"}`: last ned et treff til en klient |
 | `GET` | `/api/transfers` | flyttejobber, nyeste først |
 | `POST` | `/api/transfers` | `{"targetId", "removeFromSource", "newPath", "items": [{"instanceId", "hash"}]}`; mellom servere også `"copyFiles": true, "targetPath", "deleteSourceFiles"` |
 | `POST` | `/api/transfers/{id}/cancel` | avbryt en flyttejobb |

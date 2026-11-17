@@ -14,6 +14,7 @@ interface Props {
   stateCounts: Record<StateFilter, number>;
   onStateFilter: (s: StateFilter) => void;
   onOpenSettings: () => void;
+  onOpenSearch: () => void;
   trackers: TrackerCount[];
   hiddenTrackers: Set<string>;
   onToggleTracker: (tracker: string) => void;
@@ -74,6 +75,19 @@ export function Sidebar(props: Props) {
           Innstillinger
         </button>
       </div>
+
+      <button type="button" className="side-search" onClick={props.onOpenSearch}>
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+          <path
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            d="M8.5 3.5a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm3.8 8.8 4.2 4.2"
+          />
+        </svg>
+        Søk på trackerne
+      </button>
 
       <section className="side-summary" aria-labelledby="side-summary-heading">
         <h2 id="side-summary-heading" className="side-heading">

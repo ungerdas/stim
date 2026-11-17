@@ -136,6 +136,23 @@ type SavePather interface {
 	DefaultSavePath(ctx context.Context) (string, error)
 }
 
+// NewTorrent is a torrent to download: a .torrent file or a magnet link.
+type NewTorrent struct {
+	File     []byte
+	Magnet   string
+	SavePath string // empty: the client's own choice (category or default folder)
+	Label    string // qBittorrent category, Deluge label, Transmission/rTorrent label
+	Paused   bool
+}
+
+// ErrDuplicate means the client already has the torrent.
+var ErrDuplicate = errors.New("the client already has this torrent")
+
+// Adder is implemented by adapters that can take new torrents to download.
+type Adder interface {
+	Add(ctx context.Context, t NewTorrent) error
+}
+
 // AddOptions describes how Stim hands a torrent to a client.
 type AddOptions struct {
 	SavePath string   // where the data already is, as the client sees the path

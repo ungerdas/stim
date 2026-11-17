@@ -2,6 +2,9 @@ import type {
   Details,
   InstanceConfig,
   OrphanScan,
+  SearchHit,
+  SearchIndexer,
+  SearchSettings,
   InstanceInput,
   KindInfo,
   Snapshot,
@@ -45,6 +48,19 @@ export const api = {
   scanOrphans: (server: string) => request<OrphanScan>('/api/orphans/scan', json('POST', { server })),
   deleteOrphans: (server: string, paths: string[]) =>
     request<{ removed: string[]; failed: Record<string, string> }>('/api/orphans/delete', json('POST', { server, paths })),
+  searchSettings: () => request<SearchSettings>('/api/search/settings'),
+  saveSearchSettings: (prowlarrUrl: string, apiKey?: string) =>
+    request<SearchSettings>('/api/search/settings', json('PUT', { prowlarrUrl, apiKey })),
+  testSearch: (prowlarrUrl: string, apiKey?: string) =>
+    request<{ ok: boolean; version?: string; error?: string; indexers?: SearchIndexer[] }>(
+      '/api/search/test',
+      json('POST', { prowlarrUrl, apiKey }),
+    ),
+  searchIndexers: () => request<SearchIndexer[]>('/api/search/indexers'),
+  search: (query: string, indexerIds: number[], categories: number[]) =>
+    request<{ hits: SearchHit[]; tookMs: number }>('/api/search', json('POST', { query, indexerIds, categories })),
+  grab: (g: { id: string; instanceId: string; savePath: string; label: string; paused: boolean }) =>
+    request<{ client: string }>('/api/search/grab', json('POST', g)),
   transfers: () => request<TransferJob[]>('/api/transfers'),
   startTransfer: (req: TransferRequest) => request<TransferJob>('/api/transfers', json('POST', req)),
   cancelTransfer: (id: string) => request<void>(`/api/transfers/${id}/cancel`, json('POST', {})),

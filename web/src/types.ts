@@ -282,3 +282,33 @@ export interface OrphanScan {
   recent: number;
   scannedAt: number;
 }
+
+export interface SearchIndexer {
+  id: number;
+  name: string;
+  enabled: boolean;
+  private: boolean;
+}
+
+export interface SearchHit {
+  /** Opaque, valid for a couple of hours: the download link stays on the server. */
+  id: string;
+  title: string;
+  indexer: string;
+  indexerId: number;
+  size: number;
+  seeders?: number;
+  leechers?: number;
+  grabs?: number;
+  publishDate?: string;
+  infoUrl?: string;
+  infoHash?: string;
+  freeleech: boolean;
+  flags: string[];
+  categories: string[];
+}
+
+export interface SearchSettings {
+  prowlarrUrl: string;
+  hasApiKey: boolean;
+}

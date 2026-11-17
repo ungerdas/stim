@@ -152,6 +152,8 @@ export function SettingsPage(props: Props) {
         </section>
       )}
 
+      <ProwlarrSection />
+
       <section className="settings-section" aria-labelledby="settings-display">
         <h2 id="settings-display" className="settings-heading">
           Visning
@@ -181,5 +183,105 @@ export function SettingsPage(props: Props) {
         </p>
       </section>
     </div>
+  );
+}
+
+/** Where Stim searches trackers: a Prowlarr address and its API key. */
+function ProwlarrSection() {
+  const [url, setUrl] = useState('');
+  const [key, setKey] = useState('');
+  const [hasKey, setHasKey] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    api
+      .searchSettings()
+      .then((s) => {
+        setUrl(s.prowlarrUrl);
+        setHasKey(s.hasApiKey);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  // An empty key field keeps the stored key.
+  const keyToSend = key.trim() !== '' || !hasKey ? key.trim() : undefined;
+
+  const test = async () => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const r = await api.testSearch(url.trim(), keyToSend);
+      setStatus(
+        r.ok
+          ? { ok: true, text: `Koblet til Prowlarr ${r.version}, med ${r.indexers?.length ?? 0} trackere: ${(r.indexers ?? []).map((i) => i.name).join(', ')}.` }
+          : { ok: false, text: r.error ?? 'Ukjent feil.' },
+      );
+    } catch (e) {
+      setStatus({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const s = await api.saveSearchSettings(url.trim(), keyToSend);
+      setHasKey(s.hasApiKey);
+      setKey('');
+      setStatus({ ok: true, text: s.prowlarrUrl ? 'Lagret.' : 'Søket er slått av.' });
+    } catch (err) {
+      setStatus({ ok: false, text: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="settings-section" aria-labelledby="settings-search">
+      <h2 id="settings-search" className="settings-heading">
+        Søk på trackerne
+      </h2>
+      <p className="hint">
+        Stim søker gjennom Prowlarr, som har innloggingene til trackerne dine. API-nøkkelen står under Settings → General i
+        Prowlarr, og blir værende på Stim-serveren.
+      </p>
+      <form className="settings-form" onSubmit={save}>
+        <div className="field-row">
+          <label className="field field-grow">
+            <span className="field-label">Adresse til Prowlarr</span>
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="http://192.168.50.5:9696"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <label className="field field-grow">
+            <span className="field-label">API-nøkkel</span>
+            <input
+              type="password"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              placeholder={hasKey ? 'Uendret' : ''}
+              autoComplete="new-password"
+            />
+          </label>
+        </div>
+        <div className="dialog-actions">
+          <button type="button" className="btn" onClick={test} disabled={busy || !url.trim()}>
+            Test tilkobling
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            Lagre
+          </button>
+        </div>
+        {status && <p className={status.ok ? 'status-ok' : 'status-bad'}>{status.text}</p>}
+      </form>
+    </section>
   );
 }

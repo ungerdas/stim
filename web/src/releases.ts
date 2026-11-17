@@ -24,7 +24,11 @@ export type TableRow =
   | { type: 'release'; release: Release; open: boolean };
 
 // cross-seed's own default for how far sizes may differ.
-const SIZE_TOLERANCE = 0.02;
+export const SIZE_TOLERANCE = 0.02;
+
+/** Whether two sizes are close enough to be the same release. */
+export const sameSize = (a: number, b: number) =>
+  a > 0 && b > 0 && Math.abs(a - b) <= Math.max(a, b) * SIZE_TOLERANCE;
 
 const VIDEO_EXTENSION = /\.(mkv|mp4|m4v|avi|ts|m2ts|wmv)$/i;
 

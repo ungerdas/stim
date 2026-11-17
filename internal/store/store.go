@@ -124,6 +124,37 @@ func (s *Store) SetHostKey(id, hostKey string) error {
 
 type file struct {
 	Instances []Instance `json:"instances"`
+	Search    Search     `json:"search,omitempty"`
+}
+
+// Search is how Stim reaches the indexer manager it searches trackers
+// through. The API key stays on the server.
+type Search struct {
+	ProwlarrURL    string `json:"prowlarrUrl,omitempty"`
+	ProwlarrAPIKey string `json:"prowlarrApiKey,omitempty"`
+}
+
+// Configured reports whether a search can be tried.
+func (s Search) Configured() bool { return s.ProwlarrURL != "" && s.ProwlarrAPIKey != "" }
+
+// SearchSettings returns the search settings.
+func (s *Store) SearchSettings() Search {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.Search
+}
+
+// SetSearchSettings replaces the search settings.
+func (s *Store) SetSearchSettings(in Search) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.data.Search
+	s.data.Search = in
+	if err := s.save(); err != nil {
+		s.data.Search = old
+		return err
+	}
+	return nil
 }
 
 // Store is a small file-backed list of instances, safe for concurrent use.

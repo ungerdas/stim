@@ -18,6 +18,7 @@ import (
 	"github.com/ungerdas/stim/internal/manager"
 	"github.com/ungerdas/stim/internal/orphans"
 	"github.com/ungerdas/stim/internal/remotefiles"
+	"github.com/ungerdas/stim/internal/search"
 	"github.com/ungerdas/stim/internal/store"
 	"github.com/ungerdas/stim/internal/transfer"
 )
@@ -27,13 +28,14 @@ type Server struct {
 	store     *store.Store
 	manager   *manager.Manager
 	transfers *transfer.Engine
+	search    *search.Service
 	ui        fs.FS
 	version   string
 }
 
 // New builds the HTTP handler. ui is the built frontend (may be empty).
-func New(s *store.Store, m *manager.Manager, t *transfer.Engine, ui fs.FS, version string) http.Handler {
-	srv := &Server{store: s, manager: m, transfers: t, ui: ui, version: version}
+func New(s *store.Store, m *manager.Manager, t *transfer.Engine, sr *search.Service, ui fs.FS, version string) http.Handler {
+	srv := &Server{store: s, manager: m, transfers: t, search: sr, ui: ui, version: version}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/health", srv.health)
@@ -51,6 +53,12 @@ func New(s *store.Store, m *manager.Manager, t *transfer.Engine, ui fs.FS, versi
 	mux.HandleFunc("GET /api/details", srv.details)
 	mux.HandleFunc("POST /api/orphans/scan", srv.scanOrphans)
 	mux.HandleFunc("POST /api/orphans/delete", srv.deleteOrphans)
+	mux.HandleFunc("GET /api/search/settings", srv.searchSettings)
+	mux.HandleFunc("PUT /api/search/settings", srv.saveSearchSettings)
+	mux.HandleFunc("POST /api/search/test", srv.testSearch)
+	mux.HandleFunc("GET /api/search/indexers", srv.searchIndexers)
+	mux.HandleFunc("POST /api/search", srv.runSearch)
+	mux.HandleFunc("POST /api/search/grab", srv.grab)
 	mux.HandleFunc("GET /api/transfers", srv.listTransfers)
 	mux.HandleFunc("POST /api/transfers", srv.startTransfer)
 	mux.HandleFunc("POST /api/transfers/{id}/cancel", srv.cancelTransfer)
@@ -593,4 +601,123 @@ func (s *Server) details(w http.ResponseWriter, r *http.Request) {
 		res.Peers = []client.Peer{}
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// searchInput is what the settings form sends. A nil API key means "keep
+// the stored one".
+type searchInput struct {
+	ProwlarrURL string  `json:"prowlarrUrl"`
+	APIKey      *string `json:"apiKey"`
+}
+
+func (in searchInput) merge(base store.Search) store.Search {
+	out := store.Search{ProwlarrURL: strings.TrimRight(strings.TrimSpace(in.ProwlarrURL), "/"), ProwlarrAPIKey: base.ProwlarrAPIKey}
+	if in.APIKey != nil {
+		out.ProwlarrAPIKey = strings.TrimSpace(*in.APIKey)
+	}
+	return out
+}
+
+// searchSettings shows the Prowlarr address; the key never leaves the server.
+func (s *Server) searchSettings(w http.ResponseWriter, _ *http.Request) {
+	cfg := s.store.SearchSettings()
+	writeJSON(w, http.StatusOK, map[string]any{"prowlarrUrl": cfg.ProwlarrURL, "hasApiKey": cfg.ProwlarrAPIKey != ""})
+}
+
+func (s *Server) saveSearchSettings(w http.ResponseWriter, r *http.Request) {
+	var in searchInput
+	if !readJSON(w, r, &in) {
+		return
+	}
+	cfg := in.merge(s.store.SearchSettings())
+	if cfg.ProwlarrURL == "" {
+		cfg.ProwlarrAPIKey = "" // clearing the address turns search off
+	}
+	if err := s.store.SetSearchSettings(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"prowlarrUrl": cfg.ProwlarrURL, "hasApiKey": cfg.ProwlarrAPIKey != ""})
+}
+
+func (s *Server) testSearch(w http.ResponseWriter, r *http.Request) {
+	var in searchInput
+	if !readJSON(w, r, &in) {
+		return
+	}
+	cfg := in.merge(s.store.SearchSettings())
+	if !cfg.Configured() {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "fill in both the address and the API key"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	version, indexers, err := search.Test(ctx, cfg)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version, "indexers": indexers})
+}
+
+func (s *Server) searchIndexers(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	list, err := s.search.Indexers(ctx)
+	if errors.Is(err, search.ErrNotConfigured) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) runSearch(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Query      string `json:"query"`
+		IndexerIDs []int  `json:"indexerIds"`
+		Categories []int  `json:"categories"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
+	defer cancel()
+	start := time.Now()
+	hits, err := s.search.Search(ctx, in.Query, in.IndexerIDs, in.Categories)
+	switch {
+	case errors.Is(err, search.ErrNotConfigured):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, search.ErrBadRequest):
+		writeError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "bad request: "))
+	case err != nil:
+		writeError(w, http.StatusBadGateway, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"hits": hits, "tookMs": time.Since(start).Milliseconds()})
+	}
+}
+
+func (s *Server) grab(w http.ResponseWriter, r *http.Request) {
+	var in search.Grab
+	if !readJSON(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	name, err := s.search.Grab(ctx, in)
+	switch {
+	case errors.Is(err, search.ErrExpired):
+		writeError(w, http.StatusGone, err.Error())
+	case errors.Is(err, search.ErrDuplicate):
+		writeError(w, http.StatusConflict, strings.TrimPrefix(err.Error(), "duplicate: "))
+	case errors.Is(err, search.ErrBadRequest):
+		writeError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "bad request: "))
+	case err != nil:
+		writeError(w, http.StatusBadGateway, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, map[string]string{"client": name})
+	}
 }

@@ -61,3 +61,18 @@ export function date(unix: number): string {
   const d = new Date(unix * 1000);
   return d.getFullYear() === new Date().getFullYear() ? sameYear.format(d) : otherYear.format(d);
 }
+
+/** How long ago: "12 min", "3 t", "5 d", "4 mnd", "2 år". */
+export function age(iso: string | undefined): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const minutes = Math.max(0, (Date.now() - t) / 60000);
+  if (minutes < 60) return `${Math.max(1, Math.round(minutes))} min`;
+  const hours = minutes / 60;
+  if (hours < 48) return `${Math.round(hours)} t`;
+  const days = hours / 24;
+  if (days < 60) return `${Math.round(days)} d`;
+  if (days < 730) return `${Math.round(days / 30.4)} mnd`;
+  return `${Math.round(days / 365)} år`;
+}

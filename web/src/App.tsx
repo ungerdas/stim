@@ -11,6 +11,7 @@ import { TransferPanel } from './components/TransferPanel';
 import { DetailsPanel } from './components/DetailsPanel';
 import { OrphansDialog } from './components/OrphansDialog';
 import { SettingsPage } from './components/SettingsPage';
+import { SearchPage } from './components/SearchPage';
 import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
 import { TorrentTable, type Sort, type SortKey } from './components/TorrentTable';
 import { findDuplicates, torrentKey } from './duplicates';
@@ -22,7 +23,11 @@ const DISMISSED_KEY = 'stim.dismissedTransfers';
 const HIDDEN_TRACKERS_KEY = 'stim.hiddenTrackers';
 const DISMISSED_DUPLICATES_KEY = 'stim.dismissedDuplicates';
 const GROUP_RELEASES_KEY = 'stim.groupReleases';
-const SETTINGS_HASH = '#innstillinger';
+// Pages beside the list, by address, so the browser's back button works.
+type View = 'list' | 'settings' | 'search';
+const VIEW_HASH: Record<Exclude<View, 'list'>, string> = { settings: '#innstillinger', search: '#sok' };
+const viewOf = (hash: string): View =>
+  hash === VIEW_HASH.settings ? 'settings' : hash === VIEW_HASH.search ? 'search' : 'list';
 
 // Small per-browser settings. Storage can be unavailable or hold junk, so
 // both directions fail quietly.
@@ -94,24 +99,23 @@ export default function App() {
   // The torrent shown in the detail panel, and the server being cleaned up.
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [cleanUpServer, setCleanUpServer] = useState<string | null>(null);
-  // The settings page lives at #innstillinger, so the browser's back button
-  // returns to the list.
-  const [settingsOpen, setSettingsOpen] = useState(() => window.location.hash === SETTINGS_HASH);
+  const [view, setView] = useState<View>(() => viewOf(window.location.hash));
   const [configRevision, setConfigRevision] = useState(0);
   useEffect(() => {
-    const onHash = () => setSettingsOpen(window.location.hash === SETTINGS_HASH);
+    const onHash = () => setView(viewOf(window.location.hash));
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
-  const openSettings = () => {
-    window.location.hash = SETTINGS_HASH;
+  const openView = (v: Exclude<View, 'list'>) => {
+    window.location.hash = VIEW_HASH[v];
   };
-  const closeSettings = () => {
-    if (window.location.hash === SETTINGS_HASH) {
-      // Leave the page the way it was entered, without a hash in the address.
+  const openSettings = () => openView('settings');
+  const backToList = () => {
+    if (window.location.hash) {
+      // Back to the plain address, as a new step in the history.
       window.history.pushState(null, '', window.location.pathname + window.location.search);
     }
-    setSettingsOpen(false);
+    setView('list');
   };
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleGrouping = (on: boolean) => {
@@ -514,7 +518,19 @@ export default function App() {
 
   return (
     <div className="app">
-      {settingsOpen ? (
+      {view === 'search' ? (
+        <SearchPage
+          instances={instances}
+          torrents={torrents}
+          colorOf={colorOf}
+          onBack={backToList}
+          onOpenSettings={openSettings}
+          onAdded={(text) => {
+            setNotice({ text });
+            refresh();
+          }}
+        />
+      ) : view === 'settings' ? (
         <SettingsPage
           instances={instances}
           kinds={kinds}
@@ -524,7 +540,7 @@ export default function App() {
           onAdd={() => setDialog({ existing: null })}
           onEdit={openEdit}
           onCleanUp={setCleanUpServer}
-          onBack={closeSettings}
+          onBack={backToList}
           revision={configRevision}
         />
       ) : (
@@ -539,6 +555,7 @@ export default function App() {
         stateCounts={stateCounts}
         onStateFilter={setStateFilter}
         onOpenSettings={openSettings}
+        onOpenSearch={() => openView('search')}
         trackers={trackerCounts}
         hiddenTrackers={hiddenTrackers}
         onToggleTracker={toggleTracker}

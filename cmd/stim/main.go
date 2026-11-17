@@ -14,6 +14,7 @@ import (
 
 	"github.com/ungerdas/stim/internal/api"
 	"github.com/ungerdas/stim/internal/manager"
+	"github.com/ungerdas/stim/internal/search"
 	"github.com/ungerdas/stim/internal/store"
 	"github.com/ungerdas/stim/internal/transfer"
 	"github.com/ungerdas/stim/internal/webui"
@@ -69,7 +70,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(host, port),
-		Handler:           api.New(st, mgr, transfers, webui.FS(), version),
+		Handler:           api.New(st, mgr, transfers, search.New(st, mgr), webui.FS(), version),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
