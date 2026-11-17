@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,23 @@ func (i Instance) SSHConfig() remotefiles.Config {
 		PrivateKey: i.SSHKey,
 		HostKey:    i.SSHHostKey,
 	}
+}
+
+// Server names the machine the client runs on: the SSH host when one is
+// set, otherwise the host in the client's address. Two instances with the
+// same Server share a disk, as far as Stim can tell.
+func (i Instance) Server() string {
+	if h := strings.TrimSpace(i.SSHHost); h != "" {
+		return strings.ToLower(h)
+	}
+	u := strings.TrimSpace(i.URL)
+	if !strings.Contains(u, "://") {
+		u = "http://" + u
+	}
+	if parsed, err := url.Parse(u); err == nil {
+		return strings.ToLower(parsed.Hostname())
+	}
+	return ""
 }
 
 // ClientConfig converts the instance to what an adapter needs.

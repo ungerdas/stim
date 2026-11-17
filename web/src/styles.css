@@ -757,6 +757,17 @@ input[type='radio'] {
   color: var(--bad);
 }
 
+.transfer-where {
+  display: block;
+  color: var(--ink-soft);
+  border-top: 0;
+}
+
+.transfer-item-note {
+  grid-column: 1 / -1;
+  color: var(--ink-soft);
+}
+
 .target-picker {
   display: flex;
   flex-direction: column;

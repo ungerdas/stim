@@ -43,6 +43,7 @@ export function instanceProblemShort(inst: InstanceStatus): string {
 export const transferStateLabel: Record<TransferState, string> = {
   queued: 'Venter',
   fetching: 'Henter torrentfil',
+  copying: 'Kopierer filer',
   adding: 'Legger til',
   checking: 'Sjekker filer',
   removing: 'Fjerner fra kilden',
@@ -68,11 +69,36 @@ const transferProblems: Record<string, string> = {
   'move-failed': 'Målklienten har tatt over, men filene ble ikke flyttet til den nye mappen.',
   'host-key-changed': 'Serverens SSH-nøkkel er endret siden sist. Sjekk den under Endre på kildeklienten.',
   'ssh-failed': 'SSH-tilkoblingen til serveren feilet.',
+  'ssh-not-ready': 'SSH-tilgang mangler eller er ikke testet og lagret. Sett den opp under Endre på klienten.',
+  'source-file-missing': 'En fil mangler eller har feil størrelse på den gamle serveren. Ingenting er endret.',
+  'no-space': 'Det er ikke nok ledig plass på den nye serveren. Ingenting er endret.',
+  'copy-failed': 'Kopieringen feilet. Det som ble kopiert er slettet, og kilden er urørt.',
+  'copy-interrupted':
+    'Kopieringen stoppet underveis. Ferdige filer er beholdt på den nye serveren, så neste forsøk fortsetter der. Kilden er urørt.',
 };
 
+const copyProblems: Record<string, string> = {
+  'data-not-found': 'Målklienten fant ikke alle de kopierte filene. Kopien er slettet, og kilden er urørt.',
+  'host-key-changed': 'En servers SSH-nøkkel er endret siden sist. Sjekk den under Endre på klienten.',
+};
+
+/** Why a finished move kept the files on the old server, if it did. */
+export function transferNote(item: TransferItem): string | null {
+  switch (item.note) {
+    case 'source-files-shared':
+      return `Filene på den gamle serveren er beholdt fordi ${item.shared === 1 ? 'en annen torrent' : `${item.shared} andre torrenter`} der bruker dem.`;
+    case 'source-files-unchecked':
+      return 'Filene på den gamle serveren er beholdt: Stim fikk ikke sjekket om andre torrenter der bruker dem.';
+    case 'source-files-same':
+      return 'Filene på den gamle serveren er beholdt fordi målklienten bruker de samme filene.';
+    default:
+      return null;
+  }
+}
+
 /** A failed transfer item in plain words, with the technical detail apart. */
-export function transferProblem(item: TransferItem): { text: string; detail?: string } {
-  const text = item.code ? transferProblems[item.code] : undefined;
+export function transferProblem(item: TransferItem, copyFiles = false): { text: string; detail?: string } {
+  const text = item.code ? (copyFiles && copyProblems[item.code]) || transferProblems[item.code] : undefined;
   if (text) return { text, detail: item.error };
   return { text: item.error || 'Ukjent feil.' };
 }

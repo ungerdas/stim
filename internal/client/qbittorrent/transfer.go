@@ -140,3 +140,12 @@ func (c *Client) RemoveKeepData(ctx context.Context, hash string) error {
 func (c *Client) Move(ctx context.Context, hash, path string) error {
 	return c.post(ctx, "setLocation", url.Values{"hashes": {hash}, "location": {path}})
 }
+
+// DefaultSavePath is qBittorrent's default save folder.
+func (c *Client) DefaultSavePath(ctx context.Context) (string, error) {
+	body, err := c.get(ctx, "/api/v2/app/defaultSavePath")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(body)), nil
+}

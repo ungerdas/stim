@@ -27,6 +27,7 @@ type State string
 const (
 	StateQueued    State = "queued"
 	StateFetching  State = "fetching" // getting the .torrent file from the source
+	StateCopying   State = "copying"  // copying the files to the target server
 	StateAdding    State = "adding"   // handing it to the target, stopped
 	StateChecking  State = "checking" // target is hashing the files
 	StateRemoving  State = "removing" // removing from the source, data kept
@@ -56,7 +57,24 @@ type Item struct {
 	// TargetHash is the torrent's ID in the target client, which can differ
 	// from Hash for hybrid torrents (see client.Torrent.AltHash).
 	TargetHash string `json:"targetHash,omitempty"`
+	// Copy progress when moving between servers, in bytes; CopyStartedAt
+	// is Unix milliseconds.
+	CopyTotal     int64 `json:"copyTotal,omitempty"`
+	CopyDone      int64 `json:"copyDone,omitempty"`
+	CopyStartedAt int64 `json:"copyStartedAt,omitempty"`
+	CopyRate      int64 `json:"copyRate,omitempty"` // bytes per second, recently
+	// Note is something worth knowing about a finished item (Note*).
+	Note       string `json:"note,omitempty"`
+	NoteDetail string `json:"noteDetail,omitempty"`
+	Shared     int    `json:"shared,omitempty"` // with NoteShared: how many torrents use the files
 }
+
+// Why the files on the old server were kept although deletion was asked for.
+const (
+	NoteShared    = "source-files-shared"    // other torrents there use them
+	NoteUnchecked = "source-files-unchecked" // could not check whether others use them
+	NoteSameFiles = "source-files-same"      // target uses the very same files
+)
 
 // Job is one "move these torrents to that client" request.
 type Job struct {
@@ -64,18 +82,27 @@ type Job struct {
 	TargetID         string `json:"targetId"`
 	RemoveFromSource bool   `json:"removeFromSource"`
 	NewPath          string `json:"newPath,omitempty"`
-	Items            []Item `json:"items"`
-	CreatedAt        int64  `json:"createdAt"`
-	FinishedAt       int64  `json:"finishedAt"`
-	Cancelling       bool   `json:"cancelling"`
+	// CopyFiles moves between servers: the files are copied to TargetPath
+	// on the target's server, and with DeleteSourceFiles removed from the
+	// source server afterwards.
+	CopyFiles         bool   `json:"copyFiles,omitempty"`
+	TargetPath        string `json:"targetPath,omitempty"`
+	DeleteSourceFiles bool   `json:"deleteSourceFiles,omitempty"`
+	Items             []Item `json:"items"`
+	CreatedAt         int64  `json:"createdAt"`
+	FinishedAt        int64  `json:"finishedAt"`
+	Cancelling        bool   `json:"cancelling"`
 }
 
 // Request is what the API accepts.
 type Request struct {
-	TargetID         string `json:"targetId"`
-	RemoveFromSource bool   `json:"removeFromSource"`
-	NewPath          string `json:"newPath"`
-	Items            []struct {
+	TargetID          string `json:"targetId"`
+	RemoveFromSource  bool   `json:"removeFromSource"`
+	NewPath           string `json:"newPath"`
+	CopyFiles         bool   `json:"copyFiles"`
+	TargetPath        string `json:"targetPath"`
+	DeleteSourceFiles bool   `json:"deleteSourceFiles"`
+	Items             []struct {
 		InstanceID string `json:"instanceId"`
 		Hash       string `json:"hash"`
 		Name       string `json:"name"`
@@ -98,7 +125,13 @@ const (
 	CodeUnsupported  = "unsupported"
 	CodeHostKey      = "host-key-changed"
 	CodeSSH          = "ssh-failed"
-	CodeOther        = "other"
+	// Moving between servers.
+	CodeSSHNotReady       = "ssh-not-ready"
+	CodeSourceFileMissing = "source-file-missing"
+	CodeNoSpace           = "no-space"
+	CodeCopyFailed        = "copy-failed"
+	CodeCopyInterrupted   = "copy-interrupted" // finished files kept to resume from
+	CodeOther             = "other"
 )
 
 type failure struct {
@@ -172,9 +205,29 @@ func samePath(a, b string) bool {
 
 // Start validates a request and begins working on it in the background.
 func (e *Engine) Start(req Request) (Job, error) {
-	target, _, ok := e.clients.Lookup(req.TargetID)
+	target, targetInst, ok := e.clients.Lookup(req.TargetID)
 	if !ok {
 		return Job{}, errors.New("unknown target client")
+	}
+	req.TargetPath = strings.TrimSpace(req.TargetPath)
+	if req.CopyFiles {
+		if !path.IsAbs(req.TargetPath) {
+			return Job{}, errors.New("the folder on the target server must be an absolute path, as the target client sees it")
+		}
+		req.TargetPath = path.Clean(req.TargetPath)
+		req.NewPath = "" // the files go straight to TargetPath
+		if err := sshReady(targetInst, true); err != nil {
+			var f *failure
+			if errors.As(err, &f) {
+				return Job{}, f.err
+			}
+			return Job{}, err
+		}
+	} else {
+		req.TargetPath = ""
+	}
+	if req.DeleteSourceFiles && !(req.CopyFiles && req.RemoveFromSource) {
+		return Job{}, errors.New("deleting the files on the old server needs a copy to another server and removal from the source client")
 	}
 	if strings.TrimSpace(req.NewPath) != "" {
 		if _, ok := target.(client.Mover); !ok {
@@ -193,11 +246,14 @@ func (e *Engine) Start(req Request) (Job, error) {
 		}
 	}
 	job := &Job{
-		ID:               newID(),
-		TargetID:         req.TargetID,
-		RemoveFromSource: req.RemoveFromSource,
-		NewPath:          req.NewPath,
-		CreatedAt:        time.Now().Unix(),
+		ID:                newID(),
+		TargetID:          req.TargetID,
+		RemoveFromSource:  req.RemoveFromSource,
+		NewPath:           req.NewPath,
+		CopyFiles:         req.CopyFiles,
+		TargetPath:        req.TargetPath,
+		DeleteSourceFiles: req.DeleteSourceFiles,
+		CreatedAt:         time.Now().Unix(),
 	}
 	seen := map[string]bool{}
 	for _, it := range req.Items {
@@ -409,7 +465,7 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 	if !ok {
 		return fail(CodeGone, "the source client no longer exists")
 	}
-	dstClient, _, ok := e.clients.Lookup(job.TargetID)
+	dstClient, dstInst, ok := e.clients.Lookup(job.TargetID)
 	if !ok {
 		return fail(CodeGone, "the target client no longer exists")
 	}
@@ -455,10 +511,40 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 		return fail(CodeDuplicate, "the target client already has this torrent")
 	}
 
-	// 3. Hand it to the target, stopped, pointing at the existing files.
+	// 2b. Between servers: copy the files to the target server first.
+	savePath := t.SavePath
+	var made copied
+	removeCopies := func() {
+		if job.CopyFiles {
+			e.removeCopied(context.WithoutCancel(ctx), dstInst, made)
+		}
+	}
+	if job.CopyFiles {
+		layout, err := tf.Layout()
+		if err != nil {
+			return fail(CodeWrongFile, "the torrent's file list could not be read: %v", err)
+		}
+		e.setState(job, i, StateCopying)
+		made, err = e.copyAcross(ctx, job, i, srcInst, dstInst, layout, t.SavePath, job.TargetPath)
+		if err != nil {
+			// A copy that broke off keeps the files it finished, so trying
+			// again continues from there; a cancel or any other failure
+			// removes them.
+			var f *failure
+			if errors.As(err, &f) && f.code == CodeCopyFailed && len(made.files) > 0 {
+				return fail(CodeCopyInterrupted, "%v (the %d files copied so far are kept on the target server, so trying again continues from there)", f.err, len(made.files))
+			}
+			removeCopies()
+			return err
+		}
+		savePath = job.TargetPath
+	}
+
+	// 3. Hand it to the target, stopped, pointing at the files.
 	e.setState(job, i, StateAdding)
-	opts := client.AddOptions{SavePath: t.SavePath, Label: t.Label, Tags: t.Tags}
+	opts := client.AddOptions{SavePath: savePath, Label: t.Label, Tags: t.Tags}
 	if err := e.call(ctx, func(ctx context.Context) error { return dst.AddStopped(ctx, data, opts) }); err != nil {
+		removeCopies()
 		return fmt.Errorf("the target client did not accept the torrent: %w", err)
 	}
 
@@ -468,6 +554,14 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 	dstHash := ""
 	rollback := func(cause error) error {
 		clean := context.WithoutCancel(ctx)
+		removed := false
+		defer func() {
+			// Only delete the copies once the target no longer has the
+			// torrent; a target that kept it still points at them.
+			if removed {
+				removeCopies()
+			}
+		}()
 		if dstHash == "" {
 			// It never showed up under any ID; look once more before giving up.
 			if _, h, found, err := e.lookupAny(clean, dst, ids); err == nil && found {
@@ -475,12 +569,14 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 			}
 		}
 		if dstHash == "" {
+			removed = true
 			return cause
 		}
 		if err := e.call(clean, func(ctx context.Context) error { return dst.RemoveKeepData(ctx, dstHash) }); err != nil {
 			e.update(job, i, func(it *Item) { it.InTarget = true })
 			return fmt.Errorf("%w (and the stopped copy could not be removed from the target client: %v)", cause, err)
 		}
+		removed = true
 		return cause
 	}
 
@@ -496,7 +592,7 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 		return rollback(err)
 	}
 	if checked.Progress < 1 {
-		return rollback(fail(CodeDataNotFound, "the target client found only %.1f %% of the data in %s", checked.Progress*100, t.SavePath))
+		return rollback(fail(CodeDataNotFound, "the target client found only %.1f %% of the data in %s", checked.Progress*100, savePath))
 	}
 	if ctx.Err() != nil {
 		return rollback(ctx.Err())
@@ -506,11 +602,42 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 	steady := context.WithoutCancel(ctx)
 	e.update(job, i, func(it *Item) { it.InTarget = true; it.Progress = 1 })
 
-	// 5. Remove from the source, keeping the data.
+	// 5. Remove from the source, keeping the data unless the files now live
+	// on another server and the old copy is to go.
 	var sourceErr error
 	if job.RemoveFromSource {
 		e.setState(job, i, StateRemoving)
-		if err := e.call(steady, func(ctx context.Context) error { return src.RemoveKeepData(ctx, hash) }); err != nil {
+		deleteData := false
+		if job.DeleteSourceFiles {
+			n, err := 0, error(nil)
+			if !made.sameFiles {
+				n, err = e.sharedFiles(steady, srcInst, t)
+			}
+			switch {
+			case made.sameFiles:
+				e.update(job, i, func(it *Item) { it.Note = NoteSameFiles })
+			case err != nil:
+				e.update(job, i, func(it *Item) { it.Note, it.NoteDetail = NoteUnchecked, err.Error() })
+			case n > 0:
+				e.update(job, i, func(it *Item) { it.Note, it.Shared = NoteShared, n })
+			default:
+				deleteData = true
+			}
+		}
+		if deleteData {
+			// Pick up settings stored during this move (the source's SSH
+			// host key), which a client may need to delete files.
+			if c, _, ok := e.clients.Lookup(item.SourceID); ok {
+				srcClient = c
+			}
+		}
+		err := e.call(steady, func(ctx context.Context) error {
+			if deleteData {
+				return srcClient.Remove(ctx, []string{hash}, true)
+			}
+			return src.RemoveKeepData(ctx, hash)
+		})
+		if err != nil {
 			sourceErr = fail(CodeSourceKept, "the target client has taken over, but the torrent could not be removed from the source client: %v", err)
 		}
 	}

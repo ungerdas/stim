@@ -122,6 +122,12 @@ type TotalsReporter interface {
 	Totals() (t Totals, ok bool)
 }
 
+// SavePather reports the folder the client puts new torrents in, used to
+// suggest a target folder when moving between servers.
+type SavePather interface {
+	DefaultSavePath(ctx context.Context) (string, error)
+}
+
 // AddOptions describes how Stim hands a torrent to a client.
 type AddOptions struct {
 	SavePath string   // where the data already is, as the client sees the path
@@ -188,9 +194,10 @@ type Info struct {
 	// ExportsTorrentFiles is true when the client's API can always hand out
 	// .torrent files.
 	ExportsTorrentFiles bool `json:"exportsTorrentFiles"`
-	// SSH says what SSH access to the client's server is for: "" not used,
-	// "required" to move torrents away from the client, "optional" as a
-	// fallback when the API refuses (rTorrent behind ruTorrent).
+	// SSH says what else SSH access to the client's server is for, besides
+	// copying files between servers (which every type can use it for): ""
+	// nothing, "required" to move torrents away from the client at all,
+	// "optional" as a fallback when the API refuses (rTorrent behind ruTorrent).
 	SSH string `json:"ssh"`
 	// TorrentDirHint is the usual folder of the .torrent files, for clients
 	// whose API does not say where a torrent's file is. Empty when it does.

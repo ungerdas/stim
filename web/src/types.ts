@@ -103,6 +103,10 @@ export interface InstanceConfig {
   hasSshKey: boolean;
   sshHostFingerprint: string;
   torrentDir: string;
+  /** The machine the client runs on: the SSH host, or the host in its address. */
+  server: string;
+  /** SSH is set up and the server's key is stored, so files can be copied there. */
+  sshReady: boolean;
 }
 
 /** What the form sends. Omitted passwords keep the stored value. */
@@ -148,6 +152,7 @@ export interface TestResult {
 export type TransferState =
   | 'queued'
   | 'fetching'
+  | 'copying'
   | 'adding'
   | 'checking'
   | 'removing'
@@ -165,6 +170,14 @@ export interface TransferItem {
   code?: string;
   error?: string;
   inTarget: boolean;
+  /** Copy progress between servers, in bytes; rate in bytes per second. */
+  copyTotal?: number;
+  copyDone?: number;
+  copyRate?: number;
+  /** Why the files on the old server were kept, when deleting them was asked for. */
+  note?: 'source-files-shared' | 'source-files-unchecked' | 'source-files-same';
+  noteDetail?: string;
+  shared?: number;
 }
 
 export interface TransferJob {
@@ -172,6 +185,9 @@ export interface TransferJob {
   targetId: string;
   removeFromSource: boolean;
   newPath?: string;
+  copyFiles?: boolean;
+  targetPath?: string;
+  deleteSourceFiles?: boolean;
   items: TransferItem[];
   createdAt: number;
   finishedAt: number;
@@ -182,5 +198,8 @@ export interface TransferRequest {
   targetId: string;
   removeFromSource: boolean;
   newPath: string;
+  copyFiles: boolean;
+  targetPath: string;
+  deleteSourceFiles: boolean;
   items: { instanceId: string; hash: string; name: string }[];
 }

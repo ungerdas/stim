@@ -83,8 +83,9 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
   }, [onClose]);
 
   const kind = kinds.find((k) => k.kind === form.kind);
-  // SSH access only matters for clients whose API cannot export torrents.
-  const showSSH = Boolean(kind?.ssh);
+  // Every client type can use SSH, to copy files between servers; some also
+  // need it to hand over torrent files.
+  const showSSH = Boolean(kind);
   // Clients that say where each .torrent file is need no folder.
   const needsDir = Boolean(kind?.torrentDirHint);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -336,22 +337,25 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
           {showSSH && (
             <details className="advanced" open={Boolean(existing?.sshHost)}>
               <summary>
-                {kind?.ssh === 'optional'
-                  ? 'SSH-tilgang, valgfritt'
-                  : 'SSH-tilgang, for å flytte torrenter fra denne klienten'}
+                {kind?.ssh === 'required' ? 'SSH-tilgang, for å flytte torrenter fra denne klienten' : 'SSH-tilgang'}
               </summary>
-              {kind?.ssh === 'optional' ? (
+              {kind?.ssh === 'optional' && (
                 <p className="hint">
                   Bak ruTorrent får ikke Stim hente torrentfiler eller slette filer gjennom {kind?.label}. Med SSH-tilgang
                   gjør Stim det over SFTP i stedet: leser torrentfilen når du flytter en torrent herfra, og sletter
                   filene når du velger «Slett torrenter og filer». Over en ren /RPC2-adresse trengs det ikke.
                 </p>
-              ) : (
+              )}
+              {kind?.ssh === 'required' && (
                 <p className="hint">
                   {kind?.label} kan ikke gi fra seg torrentfiler over webgrensesnittet. For å flytte torrenter herfra til
-                  en annen klient henter Stim filene fra serveren over SFTP. Stim leser bare, og bare .torrent-filer.
+                  en annen klient henter Stim .torrent-filene fra serveren over SFTP.
                 </p>
               )}
+              <p className="hint">
+                Med SSH-tilgang kan Stim også flytte torrenter mellom servere: filene kopieres over SFTP, via Stim, og
+                skrives bare til mappen du velger når du flytter.
+              </p>
               <div className="field-row">
                 <label className="field field-grow">
                   <span className="field-label">SSH-vert</span>

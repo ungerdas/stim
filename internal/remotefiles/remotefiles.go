@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -145,7 +146,13 @@ func open(ctx context.Context, cfg Config) (*session, string, error) {
 	}
 	_ = conn.SetDeadline(time.Time{})
 	sshClient := ssh.NewClient(sshConn, chans, reqs)
-	sftpClient, err := sftp.NewClient(sshClient)
+	// Many requests in flight per file keep throughput up over high-latency
+	// links, which matters when copying between servers.
+	sftpClient, err := sftp.NewClient(sshClient,
+		sftp.UseConcurrentReads(true),
+		sftp.UseConcurrentWrites(true),
+		sftp.MaxConcurrentRequestsPerFile(64),
+	)
 	if err != nil {
 		sshClient.Close()
 		return nil, seen, fmt.Errorf("the server did not start SFTP: %w", err)
@@ -240,4 +247,108 @@ func RemoveAll(ctx context.Context, cfg Config, p string) error {
 		return fmt.Errorf("could not delete %s: %w", p, err)
 	}
 	return nil
+}
+
+// Session is an open SFTP connection for working with several files, as
+// when copying a torrent's files between servers. Close it when done.
+type Session struct {
+	s       *session
+	HostKey string // the key the server presented
+}
+
+// Open connects. Like ReadFile, it accepts an unknown server on first
+// contact and reports its key; requireKnownHost refuses that, for sessions
+// that will write or delete.
+func Open(ctx context.Context, cfg Config, requireKnownHost bool) (*Session, error) {
+	if requireKnownHost && cfg.HostKey == "" {
+		return nil, errors.New("the server's SSH key is not stored yet; test the SSH connection under the client's settings and save")
+	}
+	s, seen, err := open(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &Session{s: s, HostKey: seen}, nil
+}
+
+func (s *Session) Close() { s.s.Close() }
+
+// IsNotExist reports whether err means a file is missing.
+func IsNotExist(err error) bool {
+	return err != nil && (errors.Is(err, sftp.ErrSSHFxNoSuchFile) || errors.Is(err, os.ErrNotExist) ||
+		strings.Contains(err.Error(), "not exist"))
+}
+
+// Size returns a file's size, or an error matching IsNotExist.
+func (s *Session) Size(p string) (int64, error) {
+	fi, err := s.s.sftp.Stat(p)
+	if err != nil {
+		return 0, err
+	}
+	if !fi.Mode().IsRegular() {
+		return 0, fmt.Errorf("%s is not a regular file", p)
+	}
+	return fi.Size(), nil
+}
+
+// OpenRead opens a file for reading.
+func (s *Session) OpenRead(p string) (io.ReadCloser, error) { return s.s.sftp.Open(p) }
+
+// Create creates or truncates a file for writing.
+func (s *Session) Create(p string) (io.WriteCloser, error) { return s.s.sftp.Create(p) }
+
+// MkdirAll creates a folder and its parents. It returns the folders it
+// created, deepest last, so they can be removed again.
+func (s *Session) MkdirAll(p string) ([]string, error) {
+	var missing []string
+	for d := p; d != "/" && d != "."; d = path.Dir(d) {
+		fi, err := s.s.sftp.Stat(d)
+		if err == nil {
+			if !fi.IsDir() {
+				return nil, fmt.Errorf("%s exists and is not a folder", d)
+			}
+			break
+		}
+		if !IsNotExist(err) {
+			return nil, err
+		}
+		missing = append(missing, d)
+	}
+	created := make([]string, 0, len(missing))
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := s.s.sftp.Mkdir(missing[i]); err != nil {
+			return created, fmt.Errorf("could not create %s: %w", missing[i], err)
+		}
+		created = append(created, missing[i])
+	}
+	return created, nil
+}
+
+// Rename replaces newPath with oldPath. It prefers the POSIX rename
+// extension, which overwrites atomically.
+func (s *Session) Rename(oldPath, newPath string) error {
+	if err := s.s.sftp.PosixRename(oldPath, newPath); err == nil {
+		return nil
+	}
+	return s.s.sftp.Rename(oldPath, newPath)
+}
+
+// Remove deletes one file.
+func (s *Session) Remove(p string) error { return s.s.sftp.Remove(p) }
+
+// RemoveDir deletes an empty folder.
+func (s *Session) RemoveDir(p string) error { return s.s.sftp.RemoveDirectory(p) }
+
+// Free returns the space available to the user at p, or -1 if the server
+// does not say (it needs the statvfs extension, which OpenSSH has).
+func (s *Session) Free(p string) int64 {
+	for d := p; ; d = path.Dir(d) {
+		if st, err := s.s.sftp.StatVFS(d); err == nil {
+			return int64(st.FreeSpace())
+		} else if !IsNotExist(err) {
+			return -1
+		}
+		if d == "/" || d == "." {
+			return -1
+		}
+	}
 }

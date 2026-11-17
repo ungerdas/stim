@@ -606,3 +606,12 @@ func (c *Client) TorrentFilePath(ctx context.Context, hash string) (string, erro
 	}
 	return path.Join(dir, strings.ToUpper(hash)+".torrent"), nil
 }
+
+// DefaultSavePath is rTorrent's default download folder.
+func (c *Client) DefaultSavePath(ctx context.Context) (string, error) {
+	v, err := c.call(ctx, "directory.default")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(asString(v)), nil
+}

@@ -137,3 +137,16 @@ func (c *Client) Move(ctx context.Context, hash, path string) error {
 	_, err := c.call(ctx, "core.move_storage", []string{hash}, path)
 	return err
 }
+
+// DefaultSavePath is Deluge's download folder.
+func (c *Client) DefaultSavePath(ctx context.Context) (string, error) {
+	res, err := c.call(ctx, "core.get_config_value", "download_location")
+	if err != nil {
+		return "", err
+	}
+	var dir string
+	if err := json.Unmarshal(res, &dir); err != nil {
+		return "", err
+	}
+	return dir, nil
+}

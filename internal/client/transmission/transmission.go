@@ -479,3 +479,14 @@ func (c *Client) Trackers(ctx context.Context, hash string) ([]string, error) {
 	}
 	return urls, nil
 }
+
+// DefaultSavePath is Transmission's download folder.
+func (c *Client) DefaultSavePath(ctx context.Context) (string, error) {
+	var res struct {
+		Dir string `json:"download-dir"`
+	}
+	if err := c.call(ctx, "session-get", map[string]any{"fields": []string{"download-dir"}}, &res); err != nil {
+		return "", err
+	}
+	return res.Dir, nil
+}

@@ -259,6 +259,16 @@ func (m *Manager) Lookup(id string) (client.Client, store.Instance, bool) {
 	return e.cli, e.instance(), true
 }
 
+// Instances lists the current settings of every instance.
+func (m *Manager) Instances() []store.Instance {
+	entries := m.snapshotEntries()
+	out := make([]store.Instance, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.instance())
+	}
+	return out
+}
+
 // Invalidate makes the next snapshot refetch the given instances.
 func (m *Manager) Invalidate(ids ...string) {
 	m.mu.RLock()

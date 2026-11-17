@@ -28,6 +28,7 @@ Tidlig skjelett. Dette fungerer:
 - slette torrenter, med eller uten filene, med varsel når andre torrenter bruker de samme filene
 - varsel om dobbeltseeding: samme torrent i flere klienter, med filter og hjelp til å fjerne kopiene
 - flytte torrenter mellom klienter på samme server, med valgfri flytting av filene til en ny mappe
+- flytte torrenter mellom servere: Stim kopierer filene over SSH, og kan slette dem på den gamle serveren
 
 Dette mangler foreløpig: legge til og slette torrenter, detaljvisning (filer, trackere,
 peers), endre etikett/kategori, og **innlogging**.
@@ -76,13 +77,42 @@ Finner ikke målklienten alle filene, eller du avbryter før steg 4, fjernes kop
 kilden er urørt. Kategori/etikett og tagger følger med der målklienten støtter det. Ufullstendige torrenter
 hoppes over.
 
-Begge klientene må se filene på **samme sti**. Det gjelder for klienter som kjører som samme bruker på
-samme server, slik som på en seedboks. Kjører en av dem i Docker med andre mount-punkter, vil sjekken i
-steg 3 feile, og ingenting blir endret.
+Under **Filene** velger du om klientene deler disk:
+
+- **Samme server:** begge klientene må se filene på **samme sti**. Det gjelder for klienter som kjører som
+  samme bruker på samme server, slik som på en seedboks. Kjører en av dem i Docker med andre mount-punkter,
+  vil sjekken i steg 3 feile, og ingenting blir endret.
+- **En annen server:** Stim kopierer filene dit først (se under). Stim foreslår dette selv når kilden og
+  målet ligger på ulike servere, ut fra SSH-verten, eller verten i adressen når SSH ikke er satt opp.
+
+### Mellom servere
+
+Med «En annen server» kopierer Stim filene til mappen du velger på målserveren før steg 2, og
+målklienten peker på kopien. Mappen er forhåndsutfylt med målklientens standardmappe for nedlastinger.
+
+- **Begge** klientene trenger SSH-tilgang (se under). Målserverens SSH-nøkkel må være lagret, altså at du
+  har trykket «Test tilkobling» og lagret klienten, fordi Stim skal skrive dit.
+- Filene går **gjennom Stim**: lastes ned fra den gamle serveren og opp til den nye. Kjører Stim hjemme,
+  er det altså hjemmelinjens opplastingshastighet som setter farten. Dataene går ikke over BitTorrent, så
+  ingenting telles som nedlasting eller opplasting på trackeren.
+- Stim sjekker at hver fil finnes med riktig størrelse, og at det er plass på målserveren (med 256 MiB
+  til overs), før kopieringen starter. Filer skrives som `navn.stimpart` og får riktig navn når de er
+  ferdige. Filer som allerede ligger der med riktig størrelse, kopieres ikke på nytt; målklientens sjekk i
+  steg 3 avgjør om de er like.
+- Feiler sjekken, eller du avbryter, slettes det Stim kopierte (og mappene Stim laget) igjen, og kilden er
+  urørt. Ryker forbindelsen midt i en torrent med flere filer, beholdes de ferdige filene, så neste forsøk
+  fortsetter der.
+- **Slett filene på den gamle serveren etterpå** gjøres bare når målklienten har sjekket kopien og tatt
+  over, og gjennom kildeklienten selv. Stim sletter ikke filer som andre torrenter på den gamle serveren
+  bruker, i **alle** klientene du har lagt inn der (kryss-seeding, eller en episode seedet fra inni en
+  sesongpakke). Klarer ikke Stim å sjekke det, for eksempel fordi en av klientene er utilgjengelig,
+  beholdes filene. Fremdriftslisten sier fra når filene ble beholdt, og hvorfor.
 
 ### SSH-tilgang
 
-| Klient | Trenger SSH for | Hvor Stim leser torrentfilen |
+Alle klienttyper bruker SSH for å flytte mellom servere. Noen trenger det også ellers:
+
+| Klient | Trenger ellers SSH for | Hvor Stim leser torrentfilen |
 | --- | --- | --- |
 | qBittorrent | ingenting | gjennom API-et |
 | Deluge | å flytte torrenter herfra | mappen du oppgir, vanligvis `.config/deluge/state` |
@@ -114,8 +144,10 @@ qBittorrent gir fra seg `.torrent`-filen over API-et (4.5 og nyere). Deluge gjø
 «Test tilkobling» viser hvor mange torrentfiler Stim fant, og serverens SSH-nøkkel. Nøkkelen lagres, og
 endres den senere, nekter Stim å koble til til du har godtatt den nye under Endre.
 
-Stim leser bare `.torrent`-filer over SFTP, men SSH-innloggingen gir full tilgang til kontoen på serveren,
-og den lagres i klartekst i `config/instances.json`. Bruk gjerne en egen nøkkel kun for Stim.
+Over SFTP leser Stim `.torrent`-filer, og ved flytting mellom servere filene til torrentene som flyttes.
+Stim skriver bare til mappen du velger når du flytter, og sletter bare det Stim selv kopierte. Men
+SSH-innloggingen gir full tilgang til kontoen på serveren, og den lagres i klartekst i
+`config/instances.json`. Bruk gjerne en egen nøkkel kun for Stim.
 
 ## Dobbeltseeding
 
@@ -176,8 +208,8 @@ internal/client/qbittorrent/
 internal/client/deluge/
 internal/store/           klientoppsettet (instances.json)
 internal/transfer/        flytting mellom klienter (jobber, tilbakerulling)
-internal/torrentfile/     leser .torrent-filer uten å endre info-hashen
-internal/remotefiles/     henter filer over SFTP
+internal/torrentfile/     leser .torrent-filer (info-hash, filliste) uten å endre dem
+internal/remotefiles/     filer over SFTP: lese, kopiere, slette
 internal/manager/         én levende klient per instans, samlet og kort mellomlagret visning
 internal/api/             HTTP-API + servering av webgrensesnittet
 internal/webui/           innebygd frontend-build
@@ -207,11 +239,12 @@ Webgrensesnittet henter klienttypene fra `/api/kinds` og trenger ingen endringer
 | `DELETE` | `/api/instances/{id}` | fjern klient |
 | `POST` | `/api/instances/test` | test tilkobling uten å lagre |
 | `POST` | `/api/instances/{id}/retry` | prøv igjen etter avvist innlogging |
+| `GET` | `/api/instances/{id}/savepath` | klientens standardmappe for nedlastinger |
 | `GET` | `/api/torrents` | status per klient + alle torrenter |
 | `POST` | `/api/torrents/action` | `{"action": "pause" \| "resume", "items": [{"instanceId", "hash"}]}` |
 | `POST` | `/api/torrents/remove` | `{"items": [{"instanceId", "hash"}], "deleteData": false}`; filene slettes bare med `"deleteData": true` |
 | `GET` | `/api/transfers` | flyttejobber, nyeste først |
-| `POST` | `/api/transfers` | `{"targetId", "removeFromSource", "newPath", "items": [{"instanceId", "hash"}]}` |
+| `POST` | `/api/transfers` | `{"targetId", "removeFromSource", "newPath", "items": [{"instanceId", "hash"}]}`; mellom servere også `"copyFiles": true, "targetPath", "deleteSourceFiles"` |
 | `POST` | `/api/transfers/{id}/cancel` | avbryt en flyttejobb |
 
 ## Kjente begrensninger
@@ -227,3 +260,4 @@ Webgrensesnittet henter klienttypene fra `/api/kinds` og trenger ingen endringer
 - rTorrent fører ingen totalsum over tid, bare siden omstart. «Lagt til» er tidspunktet ruTorrent registrerte,
   eller når rTorrent lastet torrenten.
 - Transmission-etiketter vises som tagger, siden en torrent kan ha flere.
+- Flytting mellom servere sender dataene via Stim, ikke direkte fra server til server.

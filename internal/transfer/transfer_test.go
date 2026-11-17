@@ -3,6 +3,8 @@ package transfer
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -33,16 +35,43 @@ type fake struct {
 	checking  int
 	removeErr error
 	removed   []string // hashes removed, always without data
+	inst      store.Instance
+	// onDisk makes a recheck look for the file on the local disk (which the
+	// test SSH server serves) instead of reporting dataFound.
+	onDisk      bool
+	removedData []string // hashes removed together with their files
 }
 
 func newFake() *fake { return &fake{torrents: map[string]client.Torrent{}, dataFound: 1, checkFor: 2} }
 
-func (f *fake) Kind() client.Kind                                  { return "fake" }
-func (f *fake) Capabilities() client.Capabilities                  { return client.Capabilities{} }
-func (f *fake) Version(context.Context) (string, error)            { return "1", nil }
-func (f *fake) Torrents(context.Context) ([]client.Torrent, error) { return nil, nil }
-func (f *fake) Pause(context.Context, []string) error              { return nil }
-func (f *fake) Remove(context.Context, []string, bool) error       { return nil }
+func (f *fake) Kind() client.Kind                       { return "fake" }
+func (f *fake) Capabilities() client.Capabilities       { return client.Capabilities{} }
+func (f *fake) Version(context.Context) (string, error) { return "1", nil }
+func (f *fake) Pause(context.Context, []string) error   { return nil }
+
+func (f *fake) Torrents(context.Context) ([]client.Torrent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []client.Torrent
+	for _, t := range f.torrents {
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (f *fake) Remove(_ context.Context, hashes []string, deleteData bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, h := range hashes {
+		t := f.torrents[h]
+		delete(f.torrents, h)
+		if deleteData {
+			f.removedData = append(f.removedData, h)
+			_ = os.RemoveAll(filepath.Join(t.SavePath, t.Name))
+		}
+	}
+	return nil
+}
 
 func (f *fake) Resume(_ context.Context, hashes []string) error {
 	f.mu.Lock()
@@ -63,6 +92,12 @@ func (f *fake) Torrent(_ context.Context, hash string) (client.Torrent, bool, er
 		f.checking--
 		if f.checking <= 0 {
 			t.State, t.Progress = client.StatePaused, f.dataFound
+			if f.onDisk {
+				t.Progress = 0
+				if b, err := os.ReadFile(filepath.Join(t.SavePath, t.Name)); err == nil && string(b) == "hello" {
+					t.Progress = 1
+				}
+			}
 			f.torrents[hash] = t
 		}
 	}
@@ -124,7 +159,24 @@ type fakeClients map[string]*fake
 
 func (c fakeClients) Lookup(id string) (client.Client, store.Instance, bool) {
 	f, ok := c[id]
-	return f, store.Instance{ID: id}, ok
+	if !ok {
+		return nil, store.Instance{}, false
+	}
+	inst := f.inst
+	inst.ID = id
+	if inst.Name == "" {
+		inst.Name = id
+	}
+	return f, inst, true
+}
+
+func (c fakeClients) Instances() []store.Instance {
+	var out []store.Instance
+	for id := range c {
+		_, inst, _ := c.Lookup(id)
+		out = append(out, inst)
+	}
+	return out
 }
 func (fakeClients) Invalidate(...string) {}
 

@@ -31,6 +31,7 @@ export const api = {
   updateInstance: (id: string, input: InstanceInput) =>
     request<InstanceConfig>(`/api/instances/${id}`, json('PUT', input)),
   deleteInstance: (id: string) => request<void>(`/api/instances/${id}`, { method: 'DELETE' }),
+  savePath: (id: string) => request<{ path: string }>(`/api/instances/${id}/savepath`),
   retryInstance: (id: string) => request<void>(`/api/instances/${id}/retry`, json('POST', {})),
   testInstance: (input: InstanceInput) => request<TestResult>('/api/instances/test', json('POST', input)),
   act: (action: 'pause' | 'resume', items: { instanceId: string; hash: string }[]) =>

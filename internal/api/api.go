@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/ungerdas/stim/internal/client"
 	"github.com/ungerdas/stim/internal/manager"
@@ -40,6 +42,7 @@ func New(s *store.Store, m *manager.Manager, t *transfer.Engine, ui fs.FS, versi
 	mux.HandleFunc("PUT /api/instances/{id}", srv.updateInstance)
 	mux.HandleFunc("DELETE /api/instances/{id}", srv.deleteInstance)
 	mux.HandleFunc("POST /api/instances/{id}/retry", srv.retryInstance)
+	mux.HandleFunc("GET /api/instances/{id}/savepath", srv.savePath)
 	mux.HandleFunc("GET /api/torrents", srv.torrents)
 	mux.HandleFunc("POST /api/torrents/action", srv.action)
 	mux.HandleFunc("POST /api/torrents/remove", srv.remove)
@@ -132,6 +135,12 @@ type instanceView struct {
 	HasSSHKey          bool   `json:"hasSshKey"`
 	SSHHostFingerprint string `json:"sshHostFingerprint"`
 	TorrentDir         string `json:"torrentDir"`
+	// Server identifies the machine the client runs on (see
+	// store.Instance.Server), so the UI can tell same-server moves apart.
+	Server string `json:"server"`
+	// SSHReady means files can be copied to this client's server: SSH is
+	// set up and its host key is stored.
+	SSHReady bool `json:"sshReady"`
 }
 
 func view(in store.Instance) instanceView {
@@ -143,6 +152,8 @@ func view(in store.Instance) instanceView {
 		HasSSHKey:          in.SSHKey != "",
 		SSHHostFingerprint: remotefiles.Fingerprint(in.SSHHostKey),
 		TorrentDir:         in.TorrentDir,
+		Server:             in.Server(),
+		SSHReady:           in.SSHConfig().Configured() && in.SSHHostKey != "",
 
 		ID:            in.ID,
 		Name:          in.Name,
@@ -456,4 +467,27 @@ func (s *Server) static() http.Handler {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// savePath suggests a folder on the client's server for torrents moved
+// there from another server: the client's default download folder.
+func (s *Server) savePath(w http.ResponseWriter, r *http.Request) {
+	c, _, ok := s.manager.Lookup(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown client")
+		return
+	}
+	sp, ok := c.(client.SavePather)
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]string{"path": ""})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	dir, err := sp.DefaultSavePath(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path": dir})
 }
