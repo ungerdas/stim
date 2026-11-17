@@ -10,11 +10,13 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/ungerdas/stim/internal/client"
 	"github.com/ungerdas/stim/internal/manager"
+	"github.com/ungerdas/stim/internal/orphans"
 	"github.com/ungerdas/stim/internal/remotefiles"
 	"github.com/ungerdas/stim/internal/store"
 	"github.com/ungerdas/stim/internal/transfer"
@@ -46,6 +48,9 @@ func New(s *store.Store, m *manager.Manager, t *transfer.Engine, ui fs.FS, versi
 	mux.HandleFunc("GET /api/torrents", srv.torrents)
 	mux.HandleFunc("POST /api/torrents/action", srv.action)
 	mux.HandleFunc("POST /api/torrents/remove", srv.remove)
+	mux.HandleFunc("GET /api/details", srv.details)
+	mux.HandleFunc("POST /api/orphans/scan", srv.scanOrphans)
+	mux.HandleFunc("POST /api/orphans/delete", srv.deleteOrphans)
 	mux.HandleFunc("GET /api/transfers", srv.listTransfers)
 	mux.HandleFunc("POST /api/transfers", srv.startTransfer)
 	mux.HandleFunc("POST /api/transfers/{id}/cancel", srv.cancelTransfer)
@@ -490,4 +495,102 @@ func (s *Server) savePath(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"path": dir})
+}
+
+// orphanTimeout bounds a scan: listing a few folders over SSH and adding up
+// the leftovers, plus a fresh torrent list from every client on the server.
+const orphanTimeout = 3 * time.Minute
+
+// scanOrphans lists files in a server's download folders that no torrent uses.
+func (s *Server) scanOrphans(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Server string `json:"server"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), orphanTimeout)
+	defer cancel()
+	res, err := orphans.Scan(ctx, s.manager, in.Server)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// deleteOrphans removes leftovers. Each path is checked again first, so only
+// what is still a leftover in a fresh scan is removed.
+func (s *Server) deleteOrphans(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Server string   `json:"server"`
+		Paths  []string `json:"paths"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if len(in.Paths) == 0 {
+		writeError(w, http.StatusBadRequest, "nothing to delete")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), orphanTimeout)
+	defer cancel()
+	removed, failed, err := orphans.Delete(ctx, s.manager, in.Server, in.Paths)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if removed == nil {
+		removed = []string{}
+	}
+	// Free space changed: refresh the clients on that server.
+	var ids []string
+	for _, inst := range s.manager.Instances() {
+		if inst.Server() == in.Server {
+			ids = append(ids, inst.ID)
+		}
+	}
+	s.manager.Invalidate(ids...)
+	writeJSON(w, http.StatusOK, map[string]any{"removed": removed, "failed": failed})
+}
+
+// details describes one torrent for the detail panel: files, trackers with
+// their passkeys masked, and peers.
+func (s *Server) details(w http.ResponseWriter, r *http.Request) {
+	c, _, ok := s.manager.Lookup(r.URL.Query().Get("instance"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown client")
+		return
+	}
+	d, ok := c.(client.Detailer)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "this client type cannot show details")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	res, err := d.Details(ctx, strings.ToLower(r.URL.Query().Get("hash")))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	sort.Slice(res.Files, func(i, j int) bool { return res.Files[i].Path < res.Files[j].Path })
+	sort.SliceStable(res.Trackers, func(i, j int) bool { return res.Trackers[i].Tier < res.Trackers[j].Tier })
+	sort.Slice(res.Peers, func(i, j int) bool {
+		a, b := res.Peers[i], res.Peers[j]
+		if a.DownRate+a.UpRate != b.DownRate+b.UpRate {
+			return a.DownRate+a.UpRate > b.DownRate+b.UpRate
+		}
+		return a.Address < b.Address
+	})
+	if res.Files == nil {
+		res.Files = []client.File{}
+	}
+	if res.Trackers == nil {
+		res.Trackers = []client.TrackerInfo{}
+	}
+	if res.Peers == nil {
+		res.Peers = []client.Peer{}
+	}
+	writeJSON(w, http.StatusOK, res)
 }

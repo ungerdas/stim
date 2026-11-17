@@ -65,6 +65,8 @@ type Client struct {
 	totalsMu   sync.Mutex
 	totals     client.Totals
 	haveTotals bool
+	freeSpace  int64
+	spaceAt    time.Time
 }
 
 // New builds an rTorrent client. The URL may be an XML-RPC endpoint (…/RPC2
@@ -268,6 +270,12 @@ func toTorrent(row []any) client.Torrent {
 	dir := asString(get(fDirectory))
 	name := asString(get(fName))
 	savePath := dir
+	// A multi-file torrent's directory is its own folder, whatever it is
+	// called; a single file lies in the directory under the torrent's name.
+	contentPath := path.Join(dir, name)
+	if asInt(get(fMulti)) == 1 {
+		contentPath = dir
+	}
 	if asInt(get(fMulti)) == 1 && path.Base(dir) == name {
 		savePath = path.Dir(dir)
 	}
@@ -294,29 +302,51 @@ func toTorrent(row []any) client.Torrent {
 		}
 	}
 
+	trackerStatus, trackerMessage := trackerProblem(asString(get(fMessage)))
 	return client.Torrent{
-		Hash:         strings.ToLower(asString(get(fHash))),
-		Name:         name,
-		State:        state,
-		RawState:     raw,
-		Progress:     progress,
-		Size:         size,
-		Downloaded:   asInt(get(fDown)),
-		Uploaded:     asInt(get(fUp)),
-		DownloadRate: downRate,
-		UploadRate:   asInt(get(fUpRate)),
-		Ratio:        float64(asInt(get(fRatio))) / 1000,
-		ETA:          eta,
-		Seeds:        int(asInt(get(fSeeds))),
-		Peers:        int(asInt(get(fPeers))),
-		Label:        label,
-		Tags:         []string{},
-		Tracker:      tracker,
-		SavePath:     savePath,
-		AddedAt:      added,
-		CompletedAt:  finished,
-		Message:      asString(get(fMessage)),
+		TrackerStatus:  trackerStatus,
+		TrackerMessage: trackerMessage,
+		Hash:           strings.ToLower(asString(get(fHash))),
+		Name:           name,
+		State:          state,
+		RawState:       raw,
+		Progress:       progress,
+		Size:           size,
+		Downloaded:     asInt(get(fDown)),
+		Uploaded:       asInt(get(fUp)),
+		DownloadRate:   downRate,
+		UploadRate:     asInt(get(fUpRate)),
+		Ratio:          float64(asInt(get(fRatio))) / 1000,
+		ETA:            eta,
+		Seeds:          int(asInt(get(fSeeds))),
+		Peers:          int(asInt(get(fPeers))),
+		Label:          label,
+		Tags:           []string{},
+		Tracker:        tracker,
+		SavePath:       savePath,
+		ContentPath:    contentPath,
+		AddedAt:        added,
+		CompletedAt:    finished,
+		Message:        asString(get(fMessage)),
 	}
+}
+
+// trackerProblem reads rTorrent's message for a torrent, which carries the
+// last tracker failure: 'Tracker: [Failure reason "Unregistered torrent"]'
+// or 'Tracker: [Timeout was reached]'.
+func trackerProblem(message string) (status, msg string) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(message), "Tracker:")
+	if !ok {
+		return "", ""
+	}
+	msg = strings.Trim(strings.TrimSpace(rest), "[]")
+	if i, j := strings.Index(msg, `"`), strings.LastIndex(msg, `"`); i >= 0 && j > i {
+		msg = msg[i+1 : j]
+	}
+	if msg == "" {
+		msg = "not working"
+	}
+	return client.ClassifyTrackerMessage(msg), msg
 }
 
 func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
@@ -340,7 +370,58 @@ func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
 		}
 	}
 	c.updateTotals(ctx)
+	c.updateFreeSpace(ctx, out)
 	return out, nil
+}
+
+// spaceRecheck is how often free space is asked for; it changes slowly.
+const spaceRecheck = 30 * time.Second
+
+// updateFreeSpace asks rTorrent how much room is left on the disk of a
+// running torrent, preferably one in the default folder: rTorrent has no
+// client-wide figure, and reports 0 for torrents that are closed.
+func (c *Client) updateFreeSpace(ctx context.Context, list []client.Torrent) {
+	c.totalsMu.Lock()
+	due := time.Since(c.spaceAt) > spaceRecheck
+	c.totalsMu.Unlock()
+	if !due {
+		return
+	}
+	def := ""
+	if dir, err := c.call(ctx, "directory.default"); err == nil {
+		def = strings.TrimRight(asString(dir), "/")
+	}
+	var first, rest []string
+	for _, t := range list {
+		if t.State == client.StatePaused {
+			continue
+		}
+		if def != "" && strings.HasPrefix(t.SavePath, def) {
+			first = append(first, t.Hash)
+		} else {
+			rest = append(rest, t.Hash)
+		}
+	}
+	free := int64(-1)
+	for i, h := range append(first, rest...) {
+		if i == 3 {
+			break
+		}
+		if v, err := c.call(ctx, "d.free_diskspace", strings.ToUpper(h)); err == nil && asInt(v) > 0 {
+			free = asInt(v)
+			break
+		}
+	}
+	c.totalsMu.Lock()
+	c.freeSpace, c.spaceAt = free, time.Now()
+	c.totalsMu.Unlock()
+}
+
+// FreeSpace is the room left on the disk of rTorrent's default folder.
+func (c *Client) FreeSpace() (int64, bool) {
+	c.totalsMu.Lock()
+	defer c.totalsMu.Unlock()
+	return c.freeSpace, !c.spaceAt.IsZero() && c.freeSpace >= 0
 }
 
 func (c *Client) updateTotals(ctx context.Context) {

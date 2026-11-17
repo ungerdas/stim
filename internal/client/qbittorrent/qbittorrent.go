@@ -41,6 +41,9 @@ type Client struct {
 	// syncMu serialises Torrents calls, which share the sync state.
 	syncMu sync.Mutex
 	sync   syncState
+	// Tracker problems, guarded by syncMu (see trackers.go).
+	trackerCache      map[string]trackerEntry
+	noIncludeTrackers bool
 
 	mu sync.Mutex
 	// qBittorrent 5 renamed pause/resume to stop/start. Once we know which
@@ -204,6 +207,12 @@ type apiTorrent struct {
 	CompletionOn int64   `json:"completion_on"`
 	InfohashV1   string  `json:"infohash_v1"` // qBittorrent 4.4 and later
 	InfohashV2   string  `json:"infohash_v2"`
+	ContentPath  string  `json:"content_path"`
+	// Set when a tracker reports a problem; only qBittorrent 5.1 and later
+	// send these, so nil means "not told".
+	HasTrackerError       *bool `json:"has_tracker_error"`
+	HasOtherAnnounceError *bool `json:"has_other_announce_error"`
+	TrackersCount         int   `json:"trackers_count"`
 }
 
 // altHash returns the torrent's other ID form, if it has one.
@@ -257,6 +266,7 @@ func (t apiTorrent) toTorrent() client.Torrent {
 		SavePath:     t.SavePath,
 		AddedAt:      t.AddedOn,
 		CompletedAt:  completed,
+		ContentPath:  t.ContentPath,
 	}
 }
 

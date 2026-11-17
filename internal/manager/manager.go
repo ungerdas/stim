@@ -39,6 +39,11 @@ type InstanceStatus struct {
 	UploadRate   int64               `json:"uploadRate"`
 	// Totals are client-wide numbers, when the client reports them.
 	Totals *client.Totals `json:"totals,omitempty"`
+	// FreeSpace is the room left where the client saves new torrents, in
+	// bytes; -1 when unknown.
+	FreeSpace int64 `json:"freeSpace"`
+	// Server identifies the machine the client runs on (store.Instance.Server).
+	Server string `json:"server"`
 }
 
 // Torrent is a client torrent plus the instance it lives on.
@@ -63,6 +68,7 @@ type entry struct {
 	mu        sync.Mutex // serialises fetches for this instance
 	torrents  []client.Torrent
 	totals    *client.Totals
+	free      int64 // see InstanceStatus.FreeSpace
 	version   string
 	err       error
 	checkedAt time.Time // last attempt
@@ -120,6 +126,12 @@ func (e *entry) refresh(ctx context.Context) {
 			e.totals = &t
 		}
 	}
+	e.free = -1
+	if r, ok := e.cli.(client.SpaceReporter); ok {
+		if n, ok := r.FreeSpace(); ok {
+			e.free = n
+		}
+	}
 }
 
 func (e *entry) invalidate() {
@@ -172,7 +184,7 @@ func (m *Manager) Reload() {
 			next[in.ID] = old
 			continue
 		}
-		e := &entry{inst: in}
+		e := &entry{inst: in, free: -1}
 		cli, err := client.New(in.Kind, in.ClientConfig())
 		if err != nil {
 			e.cli, e.err = brokenClient{kind: in.Kind, err: err}, err
@@ -221,6 +233,8 @@ func (m *Manager) Snapshot(ctx context.Context) Snapshot {
 			Version:      e.version,
 			Count:        len(e.torrents),
 			Totals:       e.totals,
+			FreeSpace:    e.free,
+			Server:       inst.Server(),
 		}
 		if e.err != nil {
 			st.Error = e.err.Error()

@@ -23,6 +23,10 @@ Tidlig skjelett. Dette fungerer:
 - legge til, endre og fjerne klienter, med tilkoblingstest
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
 - trackerfilter: huk av hvilke trackere som skal vises (valget huskes i nettleseren)
+- trackerfeil og avregistrerte torrenter: egne filtre, markering i listen og trackerens egen melding
+- ledig plass per klient i sidemenyen, gul når det er under 50 GiB igjen
+- filer uten torrent: finn og slett rester i nedlastingsmappene på en server (over SSH)
+- detaljpanel med oversikt, filer, trackere og peers (klikk på navnet)
 - kryss-seeds samlet: samme utgivelse på flere trackere vises som én rad med trackerne, summert opplastet og
   samlet ratio, og kan foldes ut (slås av med «Samle kryss-seeds»)
 - hvor mye som er lastet opp: for utvalget i sidemenyen, og per tracker og klient under «Se statistikk»
@@ -32,8 +36,7 @@ Tidlig skjelett. Dette fungerer:
 - flytte torrenter mellom klienter på samme server, med valgfri flytting av filene til en ny mappe
 - flytte torrenter mellom servere: Stim kopierer filene over SSH, og kan slette dem på den gamle serveren
 
-Dette mangler foreløpig: legge til og slette torrenter, detaljvisning (filer, trackere,
-peers), endre etikett/kategori, og **innlogging**.
+Dette mangler foreløpig: legge til torrenter, endre etikett/kategori, og **innlogging**.
 
 > **Ingen innlogging ennå.** Alle som når porten kan pause og gjenoppta torrenter og
 > endre klientoppsettet. Hold Stim på lokalnettet eller bak en revers proxy med
@@ -165,6 +168,56 @@ Stim skriver bare til mappen du velger når du flytter, og sletter bare det Stim
 SSH-innloggingen gir full tilgang til kontoen på serveren, og den lagres i klartekst i
 `config/instances.json`. Bruk gjerne en egen nøkkel kun for Stim.
 
+## Trackerfeil og avregistrerte torrenter
+
+Stim leser trackerstatus fra hver klient og deler problemene i to filtre i sidemenyen:
+
+- **Avregistrert:** trackeren kjenner ikke torrenten lenger (slettet, «trumped», erstattet). Det går ikke over
+  av seg selv. Stim kjenner igjen de vanlige meldingene, for eksempel «Unregistered torrent», «torrent not
+  found» og «not registered», også norske varianter. «Host not found» og andre nettverksfeil regnes ikke med.
+- **Trackerfeil:** alt annet som feiler, for eksempel at trackeren er nede eller ikke svarer. Det går ofte over.
+
+En torrent regnes bare som et problem når ingen av trackerne dens virker. Trackerkolonnen markerer den, og
+meldingen vises når du holder musen over eller åpner detaljene.
+
+| Klient | Hvor statusen kommer fra |
+| --- | --- |
+| qBittorrent 5.1+ | feilflagg i listen; meldingene hentes samlet for de som har feil, og gjenbrukes i 2 minutter |
+| qBittorrent eldre | torrenter uten fungerende tracker slås opp hver for seg, 25 om gangen |
+| Deluge | trackerstatusen; en feil huskes i 30 minutter mens Deluge prøver igjen («Announce Sent») |
+| Transmission | feilfeltet (trackerfeil og -advarsler) |
+| rTorrent | meldingen rTorrent selv viser («Tracker: [...]») |
+
+## Ledig plass
+
+Under hver klient i sidemenyen står plassen som er igjen der klienten lagrer nye torrenter: fra
+qBittorrent og Deluge direkte, fra Transmission hvert 30. sekund, og fra rTorrent via en torrent som kjører
+i standardmappen. Under 50 GiB vises tallet i gult.
+
+## Filer uten torrent
+
+Under **Servere** i sidemenyen har hver server **Rydd opp**. Stim logger inn over SSH og lister mappene som
+torrentene på serveren lagres i, og sammenligner med torrentene i *alle* klientene i Stim:
+
+- Bare det som ligger rett i disse mappene sammenlignes. En mappe som hører til en torrent, får være i fred i
+  sin helhet, også om den har ekstra filer. Mapper inne i en torrents egen mappe ses ikke gjennom.
+- Skjulte filer, ting endret den siste timen, og ting med samme navn som en torrent (uten hensyn til
+  punktum, mellomrom og `.mkv`) vises aldri.
+- Hjemmemappen og mapper rett under roten ses ikke gjennom.
+- Svarer ikke alle klientene på serveren, stopper skanningen. Svarer ikke en klient på en annen server, sier
+  Stim fra, siden det kan være samme maskin lagt inn under et annet navn.
+
+Du velger selv hva som skal slettes. Rett før sletting skanner Stim på nytt, og sletter bare det som fortsatt
+ikke brukes. En klient som ikke er lagt inn i Stim kan bruke de samme mappene; filene dens vil da stå i
+listen. Se over før du sletter.
+
+## Detaljer
+
+Klikk på navnet til en torrent for å åpne detaljpanelet: oversikt (sti, datoer, info-hash, biter, kommentar),
+filer med fremdrift, trackere med status, melding og antall seedere og leechere, og tilkoblede peers.
+Passkeys i trackeradressene maskeres i Stim før de sendes til nettleseren. Panelet oppdateres hvert 3.
+sekund. Klikk på navnet til en samlet kryss-seed-rad for å folde den ut.
+
 ## Kryss-seeds i listen
 
 Torrenter med samme navn og omtrent samme størrelse regnes som samme utgivelse, for eksempel seedet på flere
@@ -243,7 +296,8 @@ internal/client/deluge/
 internal/store/           klientoppsettet (instances.json)
 internal/transfer/        flytting mellom klienter (jobber, tilbakerulling)
 internal/torrentfile/     leser .torrent-filer (info-hash, filliste) uten å endre dem
-internal/remotefiles/     filer over SFTP: lese, kopiere, slette
+internal/remotefiles/     filer over SFTP: lese, kopiere, liste, slette
+internal/orphans/         finner filer uten torrent
 internal/manager/         én levende klient per instans, samlet og kort mellomlagret visning
 internal/api/             HTTP-API + servering av webgrensesnittet
 internal/webui/           innebygd frontend-build
@@ -277,6 +331,9 @@ Webgrensesnittet henter klienttypene fra `/api/kinds` og trenger ingen endringer
 | `GET` | `/api/torrents` | status per klient + alle torrenter |
 | `POST` | `/api/torrents/action` | `{"action": "pause" \| "resume", "items": [{"instanceId", "hash"}]}` |
 | `POST` | `/api/torrents/remove` | `{"items": [{"instanceId", "hash"}], "deleteData": false}`; filene slettes bare med `"deleteData": true` |
+| `GET` | `/api/details?instance=…&hash=…` | filer, trackere (passkeys maskert), peers og egenskaper for én torrent |
+| `POST` | `/api/orphans/scan` | `{"server"}`: filer uten torrent i serverens nedlastingsmapper |
+| `POST` | `/api/orphans/delete` | `{"server", "paths": []}`: sjekker på nytt og sletter det som fortsatt er rester |
 | `GET` | `/api/transfers` | flyttejobber, nyeste først |
 | `POST` | `/api/transfers` | `{"targetId", "removeFromSource", "newPath", "items": [{"instanceId", "hash"}]}`; mellom servere også `"copyFiles": true, "targetPath", "deleteSourceFiles"` |
 | `POST` | `/api/transfers/{id}/cancel` | avbryt en flyttejobb |

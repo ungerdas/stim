@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ungerdas/stim/internal/client"
 )
@@ -63,6 +64,8 @@ type Client struct {
 	totalsMu   sync.Mutex
 	totals     client.Totals
 	haveTotals bool
+	freeSpace  int64
+	spaceAt    time.Time
 }
 
 // New builds a Transmission client. The URL may be the server
@@ -227,9 +230,31 @@ const (
 	statusSeed
 )
 
-// errLocal is Transmission's error number for a problem with local data, as
-// opposed to tracker warnings and errors (1 and 2).
-const errLocal = 3
+// Transmission's error numbers: tracker warning, tracker error, and a
+// problem with local data.
+const (
+	errTrackerWarning = 1
+	errTracker        = 2
+	errLocal          = 3
+)
+
+// trackerProblem reads Transmission's error for the torrent. A warning only
+// counts when it says the torrent is unregistered.
+func (t apiTorrent) trackerProblem() (status, message string) {
+	if t.Error != errTracker && t.Error != errTrackerWarning {
+		return "", ""
+	}
+	msg := t.ErrorString
+	// 'Tracker gave an error: "Unregistered torrent"' → the quoted part.
+	if i, j := strings.Index(msg, `"`), strings.LastIndex(msg, `"`); i >= 0 && j > i {
+		msg = msg[i+1 : j]
+	}
+	status = client.ClassifyTrackerMessage(msg)
+	if t.Error == errTrackerWarning && status != client.TrackerUnregistered {
+		return "", ""
+	}
+	return status, msg
+}
 
 func (t apiTorrent) toTorrent() client.Torrent {
 	state, raw := client.StateUnknown, "unknown"
@@ -256,6 +281,7 @@ func (t apiTorrent) toTorrent() client.Torrent {
 	if t.Error == errLocal {
 		state = client.StateError
 	}
+	trackerStatus, trackerMessage := t.trackerProblem()
 	eta := t.ETA
 	if eta < 0 || t.PercentDone >= 1 {
 		eta = -1
@@ -279,26 +305,28 @@ func (t apiTorrent) toTorrent() client.Torrent {
 		tags = []string{}
 	}
 	return client.Torrent{
-		Hash:         strings.ToLower(t.Hash),
-		Name:         t.Name,
-		State:        state,
-		RawState:     raw,
-		Progress:     t.PercentDone,
-		Size:         t.SizeWhenDone,
-		Downloaded:   t.Downloaded,
-		Uploaded:     t.Uploaded,
-		DownloadRate: t.RateDown,
-		UploadRate:   t.RateUp,
-		Ratio:        ratio,
-		ETA:          eta,
-		Seeds:        t.Seeds,
-		Peers:        t.Peers,
-		Tags:         tags,
-		Tracker:      tracker,
-		SavePath:     t.DownloadDir,
-		AddedAt:      t.AddedDate,
-		CompletedAt:  completed,
-		Message:      msg,
+		Hash:           strings.ToLower(t.Hash),
+		Name:           t.Name,
+		State:          state,
+		RawState:       raw,
+		Progress:       t.PercentDone,
+		Size:           t.SizeWhenDone,
+		Downloaded:     t.Downloaded,
+		Uploaded:       t.Uploaded,
+		DownloadRate:   t.RateDown,
+		UploadRate:     t.RateUp,
+		Ratio:          ratio,
+		ETA:            eta,
+		Seeds:          t.Seeds,
+		Peers:          t.Peers,
+		Tags:           tags,
+		Tracker:        tracker,
+		SavePath:       t.DownloadDir,
+		AddedAt:        t.AddedDate,
+		CompletedAt:    completed,
+		Message:        msg,
+		TrackerStatus:  trackerStatus,
+		TrackerMessage: trackerMessage,
 	}
 }
 
@@ -351,7 +379,39 @@ func (c *Client) updateTotals(ctx context.Context) {
 	}
 	c.totalsMu.Lock()
 	c.totals, c.haveTotals = totals, true
+	refreshSpace := time.Since(c.spaceAt) > spaceRecheck
 	c.totalsMu.Unlock()
+	if refreshSpace {
+		c.updateFreeSpace(ctx)
+	}
+}
+
+// spaceRecheck is how often free space is asked for; it changes slowly.
+const spaceRecheck = 30 * time.Second
+
+func (c *Client) updateFreeSpace(ctx context.Context) {
+	free := int64(-1)
+	var session struct {
+		Dir string `json:"download-dir"`
+	}
+	if err := c.call(ctx, "session-get", map[string]any{"fields": []string{"download-dir"}}, &session); err == nil && session.Dir != "" {
+		var res struct {
+			Size *int64 `json:"size-bytes"`
+		}
+		if err := c.call(ctx, "free-space", map[string]any{"path": session.Dir}, &res); err == nil && res.Size != nil {
+			free = *res.Size
+		}
+	}
+	c.totalsMu.Lock()
+	c.freeSpace, c.spaceAt = free, time.Now()
+	c.totalsMu.Unlock()
+}
+
+// FreeSpace is what Transmission reports as free in its download folder.
+func (c *Client) FreeSpace() (int64, bool) {
+	c.totalsMu.Lock()
+	defer c.totalsMu.Unlock()
+	return c.freeSpace, !c.spaceAt.IsZero() && c.freeSpace >= 0
 }
 
 // Totals returns what session-stats said during the last Torrents call.

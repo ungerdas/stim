@@ -1,5 +1,7 @@
 import type {
+  Details,
   InstanceConfig,
+  OrphanScan,
   InstanceInput,
   KindInfo,
   Snapshot,
@@ -38,6 +40,11 @@ export const api = {
     request<{ failed: Record<string, string> }>('/api/torrents/action', json('POST', { action, items })),
   remove: (items: { instanceId: string; hash: string }[], deleteData: boolean) =>
     request<{ failed: Record<string, string> }>('/api/torrents/remove', json('POST', { items, deleteData })),
+  details: (instanceId: string, hash: string) =>
+    request<Details>(`/api/details?instance=${encodeURIComponent(instanceId)}&hash=${encodeURIComponent(hash)}`),
+  scanOrphans: (server: string) => request<OrphanScan>('/api/orphans/scan', json('POST', { server })),
+  deleteOrphans: (server: string, paths: string[]) =>
+    request<{ removed: string[]; failed: Record<string, string> }>('/api/orphans/delete', json('POST', { server, paths })),
   transfers: () => request<TransferJob[]>('/api/transfers'),
   startTransfer: (req: TransferRequest) => request<TransferJob>('/api/transfers', json('POST', req)),
   cancelTransfer: (id: string) => request<void>(`/api/transfers/${id}/cancel`, json('POST', {})),

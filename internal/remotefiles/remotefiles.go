@@ -352,3 +352,37 @@ func (s *Session) Free(p string) int64 {
 		}
 	}
 }
+
+// Home is the folder the SSH user starts in.
+func (s *Session) Home() (string, error) { return s.s.sftp.Getwd() }
+
+// ReadDir lists a folder without following symbolic links.
+func (s *Session) ReadDir(p string) ([]os.FileInfo, error) { return s.s.sftp.ReadDir(p) }
+
+// DiskUsage adds up the sizes of the files under p, without following
+// symbolic links, and reports the newest modification time seen. It stops
+// after limit entries; complete is then false.
+func (s *Session) DiskUsage(p string, limit int) (size int64, newest time.Time, complete bool, err error) {
+	w := s.s.sftp.Walk(p)
+	n := 0
+	for w.Step() {
+		if err := w.Err(); err != nil {
+			if w.Path() == p {
+				return 0, time.Time{}, false, err
+			}
+			continue // an unreadable corner; count what can be read
+		}
+		n++
+		if n > limit {
+			return size, newest, false, nil
+		}
+		fi := w.Stat()
+		if fi.Mode().IsRegular() {
+			size += fi.Size()
+		}
+		if fi.ModTime().After(newest) {
+			newest = fi.ModTime()
+		}
+	}
+	return size, newest, true, nil
+}

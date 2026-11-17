@@ -38,6 +38,10 @@ export interface Torrent {
   addedAt: number;
   completedAt: number;
   message?: string;
+  /** A tracker problem: "unregistered" will not pass, "error" may. */
+  trackerStatus?: 'error' | 'unregistered';
+  trackerMessage?: string;
+  contentPath?: string;
 }
 
 export type ErrorCode = 'auth' | 'wrong-type' | 'unreachable' | 'other';
@@ -55,6 +59,10 @@ export interface InstanceStatus {
   count: number;
   downloadRate: number;
   uploadRate: number;
+  /** Room left where the client saves new torrents, in bytes; -1 when unknown. */
+  freeSpace: number;
+  /** The machine the client runs on. */
+  server: string;
   /** Client-wide totals in bytes; -1 where the client does not report one. */
   totals?: {
     allTimeUpload: number;
@@ -210,4 +218,67 @@ export interface TransferRequest {
   targetPath: string;
   deleteSourceFiles: boolean;
   items: { instanceId: string; hash: string; name: string }[];
+}
+
+export interface TorrentFile {
+  path: string;
+  size: number;
+  progress: number;
+  wanted: boolean;
+}
+
+export interface TrackerInfo {
+  /** Passkeys are masked by the server. */
+  url: string;
+  tier: number;
+  status: 'working' | 'updating' | 'error' | 'waiting' | 'disabled';
+  message?: string;
+  /** -1 when unknown. */
+  seeds: number;
+  leeches: number;
+  downloaded: number;
+}
+
+export interface Peer {
+  address: string;
+  client: string;
+  progress: number;
+  downRate: number;
+  upRate: number;
+  flags?: string;
+  country?: string;
+  encrypted: boolean;
+}
+
+export interface Details {
+  files: TorrentFile[];
+  trackers: TrackerInfo[];
+  peers: Peer[];
+  comment?: string;
+  createdBy?: string;
+  createdAt?: number;
+  pieceSize?: number;
+  pieces?: number;
+  private?: boolean;
+}
+
+export interface OrphanItem {
+  path: string;
+  size: number;
+  isDir: boolean;
+  modTime: number;
+  sizeIncomplete?: boolean;
+}
+
+export interface OrphanScan {
+  server: string;
+  clients: string[];
+  /** Clients elsewhere that did not answer, so their torrents were not counted. */
+  unanswered: string[];
+  dirs: string[];
+  skipped: string[];
+  items: OrphanItem[];
+  total: number;
+  recent: number;
+  scannedAt: number;
 }

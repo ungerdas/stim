@@ -2,7 +2,7 @@ import type { InstanceStatus, KindInfo, State } from '../types';
 import { bytes, count, ratio } from '../format';
 import { instanceProblemShort, stateLabel } from '../text';
 
-export type StateFilter = State | 'all' | 'active' | 'duplicates';
+export type StateFilter = State | 'all' | 'active' | 'duplicates' | 'unregistered' | 'trackerError';
 
 interface Props {
   instances: InstanceStatus[];
@@ -16,6 +16,8 @@ interface Props {
   onStateFilter: (s: StateFilter) => void;
   onAdd: () => void;
   onEdit: (id: string) => void;
+  /** Opens the search for files no torrent uses, on one server. */
+  onCleanUp: (server: string) => void;
   trackers: TrackerCount[];
   hiddenTrackers: Set<string>;
   onToggleTracker: (tracker: string) => void;
@@ -37,8 +39,11 @@ export const trackerLabel = (name: string) => name || 'Uten tracker';
 // Always shown, then any other state that currently has torrents.
 const FIXED_STATES: StateFilter[] = ['all', 'active', 'downloading', 'seeding', 'paused', 'error'];
 // Only shown when there is something to show (or it is the current filter).
-const CONDITIONAL: StateFilter[] = ['duplicates'];
+const CONDITIONAL: StateFilter[] = ['unregistered', 'trackerError', 'duplicates'];
 const EXTRA_STATES: StateFilter[] = ['queued', 'checking', 'moving', 'unknown'];
+
+// Below this, the free space is shown as a warning: a season pack or two.
+const LOW_SPACE = 50 * 2 ** 30;
 
 const buildStamp = new Intl.DateTimeFormat('nb-NO', {
   day: 'numeric',
@@ -51,6 +56,8 @@ function stateFilterLabel(s: StateFilter): string {
   if (s === 'all') return 'Alle';
   if (s === 'active') return 'Aktive nå';
   if (s === 'duplicates') return 'Dobbelt seedet';
+  if (s === 'unregistered') return 'Avregistrert';
+  if (s === 'trackerError') return 'Trackerfeil';
   return stateLabel[s];
 }
 
@@ -58,6 +65,7 @@ export function Sidebar(props: Props) {
   const { instances, kinds, colorOf, stateCounts } = props;
   const kindLabel = (kind: string) => kinds.find((k) => k.kind === kind)?.label ?? kind;
   const shown = (s: StateFilter) => stateCounts[s] > 0 || props.stateFilter === s;
+  const servers = [...new Set(instances.map((i) => i.server).filter(Boolean))].sort();
   const states = [
     ...FIXED_STATES.slice(0, 2),
     ...CONDITIONAL.filter(shown),
@@ -117,10 +125,20 @@ export function Sidebar(props: Props) {
                 <span className="side-item-main">
                   <span className="side-item-name">{inst.name}</span>
                   {inst.online ? (
-                    <span className="side-item-sub">
-                      {kindLabel(inst.kind)}
-                      {inst.version ? ` ${inst.version}` : ''}
-                    </span>
+                    <>
+                      <span className="side-item-sub">
+                        {kindLabel(inst.kind)}
+                        {inst.version ? ` ${inst.version}` : ''}
+                      </span>
+                      {inst.freeSpace >= 0 && (
+                        <span
+                          className={`side-item-sub side-free${inst.freeSpace < LOW_SPACE ? ' is-low' : ''}`}
+                          title={inst.server ? `Ledig plass på ${inst.server}, der klienten lagrer nye torrenter` : undefined}
+                        >
+                          {bytes(inst.freeSpace)} ledig
+                        </span>
+                      )}
+                    </>
                   ) : (
                     <span className="side-item-sub side-item-problem">{instanceProblemShort(inst)}</span>
                   )}
@@ -142,6 +160,26 @@ export function Sidebar(props: Props) {
           Legg til klient
         </button>
       </nav>
+
+      {servers.length > 0 && (
+        <section className="side-section" aria-labelledby="side-servers">
+          <h2 id="side-servers" className="side-heading">
+            Servere
+          </h2>
+          <ul className="side-list">
+            {servers.map((s) => (
+              <li key={s} className="side-server">
+                <span className="side-server-name" title={s}>
+                  {s}
+                </span>
+                <button type="button" className="side-heading-action" onClick={() => props.onCleanUp(s)}>
+                  Rydd opp
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <nav className="side-section" aria-labelledby="side-states">
         <h2 id="side-states" className="side-heading">

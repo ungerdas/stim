@@ -83,6 +83,16 @@ const STATE_ORDER: State[] = ['error', 'downloading', 'checking', 'moving', 'que
 const uniqueSorted = (values: string[]) =>
   [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'nb'));
 
+function trackerProblem(members: Torrent[]): Pick<Torrent, 'trackerStatus' | 'trackerMessage'> {
+  for (const status of ['unregistered', 'error'] as const) {
+    const hit = members.filter((t) => t.trackerStatus === status);
+    if (hit.length > 0) {
+      return { trackerStatus: status, trackerMessage: hit.map((t) => `${t.tracker}: ${t.trackerMessage ?? ''}`).join('; ') };
+    }
+  }
+  return { trackerStatus: undefined, trackerMessage: undefined };
+}
+
 function summarize(key: string, members: Torrent[]): Release {
   const first = members[0];
   const size = Math.max(...members.map((t) => t.size));
@@ -114,6 +124,8 @@ function summarize(key: string, members: Torrent[]): Release {
     label: uniqueSorted(members.map((t) => t.label)).join(', '),
     tags: uniqueSorted(members.flatMap((t) => t.tags)),
     tracker: trackers.join(', '),
+    // The worst tracker problem among the members, naming where it is.
+    ...trackerProblem(members),
     addedAt: added.length > 0 ? Math.min(...added) : 0,
   };
   return { key, members, summary, trackers, instanceIds };

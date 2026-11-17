@@ -62,6 +62,8 @@ interface Props {
   /** What to draw: torrents, releases and the members of open releases. */
   rows: TableRow[];
   onExpand: (releaseKey: string) => void;
+  /** Opens the detail panel for a torrent. */
+  onOpen: (t: Torrent) => void;
   instanceOf: (instanceId: string) => InstanceStatus | undefined;
   colorOf: (instanceId: string) => string;
   selected: Set<string>;
@@ -155,6 +157,7 @@ export function TorrentTable(props: Props) {
               open={row.type === 'release' && row.open}
               child={row.type === 'torrent' && row.child}
               onExpand={props.onExpand}
+              onOpen={props.onOpen}
               index={v.index}
               top={v.start - HEADER_HEIGHT}
               height={rowHeight}
@@ -180,6 +183,7 @@ interface RowProps {
   open: boolean;
   child: boolean;
   onExpand: (releaseKey: string) => void;
+  onOpen: (t: Torrent) => void;
   partial: boolean;
   index: number;
   top: number;
@@ -192,8 +196,10 @@ interface RowProps {
   dupOthers: string;
 }
 
+const TRACKER_PROBLEM = { unregistered: 'Avregistrert', error: 'Trackerfeil' } as const;
+
 /** "norbits.net" → "norbits" */
-const siteName = (domain: string) => domain.split('.')[0] || domain;
+const siteName = (domain: string) => (/^[\d.:]+$/.test(domain) ? domain : domain.split('.')[0] || domain);
 
 /** "4 trackere", or "3 torrenter" when some share a tracker (copies in several clients). */
 function releaseBadge(r: Release): { text: string; title: string } {
@@ -211,6 +217,7 @@ const Row = memo(function Row({
   open,
   child,
   onExpand,
+  onOpen,
   partial,
   index,
   top,
@@ -228,6 +235,7 @@ const Row = memo(function Row({
   const stateTitle = t.message ? `${t.rawState}: ${t.message}` : `Klientens status: ${t.rawState}`;
   const labelText = [t.label, ...t.tags].filter(Boolean).join(', ');
   const badge = release && releaseBadge(release);
+  const problemText = t.trackerStatus ? TRACKER_PROBLEM[t.trackerStatus] : '';
   const what = release ? `${t.name}, alle ${release.members.length}` : child ? `${t.name} på ${t.tracker || 'ukjent tracker'}` : t.name;
 
   return (
@@ -269,9 +277,14 @@ const Row = memo(function Row({
               <span aria-hidden="true">{open ? '▾' : '▸'}</span>
             </button>
           )}
-          <span className="name" title={t.name}>
+          <button
+            type="button"
+            className="name"
+            title={release ? t.name : `${t.name}\nVis detaljer`}
+            onClick={() => (release ? onExpand(release.key) : onOpen(t))}
+          >
             {t.name}
-          </span>
+          </button>
           {badge && (
             <span className="release-badge" title={badge.title}>
               {badge.text}
@@ -290,6 +303,7 @@ const Row = memo(function Row({
           <span className="name-meta-inst">{instanceName}</span>
           <span className={`state-text state-${t.state}`}>{stateText}</span>
           <span>{percent(t.progress)}</span>
+          {problemText && <span className={`tracker-${t.trackerStatus}`}>{problemText}</span>}
           {t.downloadRate > 0 && <span>↓ {rate(t.downloadRate)}</span>}
           {t.uploadRate > 0 && <span>↑ {rate(t.uploadRate)}</span>}
         </span>
@@ -333,7 +347,16 @@ const Row = memo(function Row({
       <div className="cell col-label" role="gridcell" title={labelText}>
         <span className="ellipsis">{labelText}</span>
       </div>
-      <div className="cell col-tracker" role="gridcell" title={t.tracker}>
+      <div
+        className={`cell col-tracker${t.trackerStatus ? ` tracker-${t.trackerStatus}` : ''}`}
+        role="gridcell"
+        title={problemText ? `${problemText}\n${t.trackerMessage ?? ''}` : t.tracker}
+      >
+        {problemText && (
+          <span className="tracker-flag" role="img" aria-label={problemText}>
+            !
+          </span>
+        )}
         {/* For a release, the site names alone, so more of them fit. */}
         <span className="ellipsis">{release ? release.trackers.map(siteName).join(', ') : t.tracker}</span>
       </div>

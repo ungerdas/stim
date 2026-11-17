@@ -70,7 +70,17 @@ func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
 		c.sync.reset()
 		return nil, err
 	}
-	return c.sync.list(), nil
+	list := c.sync.list()
+	c.annotateTrackers(ctx, list)
+	return list, nil
+}
+
+// FreeSpace is what qBittorrent reports as free in its default save folder.
+func (c *Client) FreeSpace() (int64, bool) {
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	n := c.sync.number("free_space_on_disk")
+	return n, n >= 0 && c.sync.haveTotals
 }
 
 func (s *syncState) apply(md mainData) error {

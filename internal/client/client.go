@@ -60,6 +60,14 @@ type Torrent struct {
 	AddedAt      int64    `json:"addedAt"`
 	CompletedAt  int64    `json:"completedAt"` // 0 when not completed
 	Message      string   `json:"message,omitempty"`
+	// TrackerStatus is TrackerError or TrackerUnregistered when the trackers
+	// have a problem with the torrent, with the tracker's own words in
+	// TrackerMessage; empty otherwise.
+	TrackerStatus  string `json:"trackerStatus,omitempty"`
+	TrackerMessage string `json:"trackerMessage,omitempty"`
+	// ContentPath is the torrent's file or top folder, when the client says;
+	// otherwise SavePath joined with Name is the best guess.
+	ContentPath string `json:"contentPath,omitempty"`
 }
 
 // Capabilities tells the UI what a client type supports, so features can be

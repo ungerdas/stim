@@ -8,6 +8,8 @@ import { MoveDialog } from './components/MoveDialog';
 import { StatsDialog } from './components/StatsDialog';
 import { DeleteDialog } from './components/DeleteDialog';
 import { TransferPanel } from './components/TransferPanel';
+import { DetailsPanel } from './components/DetailsPanel';
+import { OrphansDialog } from './components/OrphansDialog';
 import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
 import { TorrentTable, type Sort, type SortKey } from './components/TorrentTable';
 import { findDuplicates, torrentKey } from './duplicates';
@@ -87,6 +89,9 @@ export default function App() {
   const lastClicked = useRef<string | null>(null);
   // One row per release seeded on several trackers, unless turned off.
   const [grouping, setGrouping] = useState(() => loadFlag(GROUP_RELEASES_KEY, true));
+  // The torrent shown in the detail panel, and the server being cleaned up.
+  const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [cleanUpServer, setCleanUpServer] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleGrouping = (on: boolean) => {
     setGrouping(on);
@@ -307,9 +312,13 @@ export default function App() {
       error: 0,
       unknown: 0,
       duplicates: 0,
+      unregistered: 0,
+      trackerError: 0,
     } satisfies Record<StateFilter, number>;
     for (const t of inTracker) {
       counts[t.state]++;
+      if (t.trackerStatus === 'unregistered') counts.unregistered++;
+      else if (t.trackerStatus === 'error') counts.trackerError++;
       if (t.downloadRate > 0 || t.uploadRate > 0) counts.active++;
       if (dups.byKey.has(torrentKey(t))) counts.duplicates++;
     }
@@ -349,6 +358,10 @@ export default function App() {
         if (t.downloadRate <= 0 && t.uploadRate <= 0) return false;
       } else if (stateFilter === 'duplicates') {
         if (!dups.byKey.has(torrentKey(t))) return false;
+      } else if (stateFilter === 'unregistered') {
+        if (t.trackerStatus !== 'unregistered') return false;
+      } else if (stateFilter === 'trackerError') {
+        if (t.trackerStatus !== 'error') return false;
       } else if (stateFilter !== 'all' && t.state !== stateFilter) {
         return false;
       }
@@ -456,6 +469,11 @@ export default function App() {
   const closeMove = useCallback(() => setMoveOpen(false), []);
   const closeStats = useCallback(() => setStatsOpen(false), []);
   const closeDelete = useCallback(() => setDeleteOpen(false), []);
+  const closeDetails = useCallback(() => setDetailKey(null), []);
+  const closeCleanUp = useCallback(() => setCleanUpServer(null), []);
+  const openDetails = useCallback((t: Torrent) => setDetailKey(torrentKey(t)), []);
+  // The panel follows the torrent through refreshes, and closes if it goes.
+  const detailTorrent = detailKey ? torrents.find((t) => torrentKey(t) === detailKey) : undefined;
 
   const openEdit = async (id: string) => {
     try {
@@ -487,6 +505,7 @@ export default function App() {
         onStateFilter={setStateFilter}
         onAdd={() => setDialog({ existing: null })}
         onEdit={openEdit}
+        onCleanUp={setCleanUpServer}
         trackers={trackerCounts}
         hiddenTrackers={hiddenTrackers}
         onToggleTracker={toggleTracker}
@@ -683,6 +702,7 @@ export default function App() {
             torrents={visible}
             rows={rows}
             onExpand={toggleExpanded}
+            onOpen={openDetails}
             instanceOf={instanceOf}
             colorOf={colorOf}
             selected={selected}
@@ -724,6 +744,27 @@ export default function App() {
           onEditInstance={(id) => {
             setMoveOpen(false);
             openEdit(id);
+          }}
+        />
+      )}
+
+      {detailTorrent && (
+        <DetailsPanel
+          torrent={detailTorrent}
+          instance={instanceOf(detailTorrent.instanceId)}
+          color={colorOf(detailTorrent.instanceId)}
+          onClose={closeDetails}
+        />
+      )}
+
+      {cleanUpServer && (
+        <OrphansDialog
+          server={cleanUpServer}
+          onClose={closeCleanUp}
+          onEditClients={() => {
+            const inst = instances.find((i) => i.server === cleanUpServer);
+            setCleanUpServer(null);
+            if (inst) openEdit(inst.id);
           }}
         />
       )}

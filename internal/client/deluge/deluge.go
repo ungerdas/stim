@@ -57,6 +57,10 @@ type Client struct {
 	totalsMu   sync.Mutex
 	totals     client.Totals
 	haveTotals bool
+	freeSpace  int64
+
+	trackerMu   sync.Mutex
+	trackerSeen map[string]trackerProblemSeen
 	// Whether the Stats plugin answered last time, and when that was
 	// checked, so a missing plugin is not asked for on every poll.
 	statsPlugin        bool
@@ -245,6 +249,7 @@ var statusKeys = []string{
 	"all_time_download", "download_payload_rate", "upload_payload_rate",
 	"ratio", "eta", "num_seeds", "num_peers", "label", "tracker_host",
 	"download_location", "save_path", "time_added", "completed_time", "message",
+	"tracker_status",
 }
 
 // apiTorrent uses float64 throughout because Deluge reports several integer
@@ -270,6 +275,26 @@ type apiTorrent struct {
 	TimeAdded        float64 `json:"time_added"`
 	CompletedTime    float64 `json:"completed_time"`
 	Message          string  `json:"message"`
+	TrackerStatus    string  `json:"tracker_status"` // "Announce OK", "Error: …", "Warning: …"
+}
+
+// trackerProblem reads Deluge's tracker status. Errors count; a warning only
+// when it says the torrent is unregistered, as some trackers send that so.
+func trackerProblem(s string) (status, message string) {
+	switch {
+	case strings.HasPrefix(s, "Error:"):
+		msg := strings.TrimSpace(strings.TrimPrefix(s, "Error:"))
+		if msg == "" {
+			msg = "not working"
+		}
+		return client.ClassifyTrackerMessage(msg), msg
+	case strings.HasPrefix(s, "Warning:"):
+		msg := strings.TrimSpace(strings.TrimPrefix(s, "Warning:"))
+		if client.ClassifyTrackerMessage(msg) == client.TrackerUnregistered {
+			return client.TrackerUnregistered, msg
+		}
+	}
+	return "", ""
 }
 
 func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
@@ -286,7 +311,46 @@ func (c *Client) Torrents(ctx context.Context) ([]client.Torrent, error) {
 	for hash, t := range raw {
 		out = append(out, t.toTorrent(hash))
 	}
+	c.rememberTrackerProblems(out, raw)
 	return out, nil
+}
+
+// trackerMemory is how long a tracker error is kept while Deluge shows
+// "Announce Sent": it retries a failing tracker every so often, and its
+// status flips between the error and "Announce Sent" each time.
+const trackerMemory = 30 * time.Minute
+
+type trackerProblemSeen struct {
+	status, message string
+	at              time.Time
+}
+
+func (c *Client) rememberTrackerProblems(list []client.Torrent, raw map[string]apiTorrent) {
+	c.trackerMu.Lock()
+	defer c.trackerMu.Unlock()
+	if c.trackerSeen == nil {
+		c.trackerSeen = map[string]trackerProblemSeen{}
+	}
+	present := make(map[string]bool, len(list))
+	for i := range list {
+		t := &list[i]
+		present[t.Hash] = true
+		switch {
+		case t.TrackerStatus != "":
+			c.trackerSeen[t.Hash] = trackerProblemSeen{t.TrackerStatus, t.TrackerMessage, time.Now()}
+		case strings.HasPrefix(raw[t.Hash].TrackerStatus, "Announce OK"):
+			delete(c.trackerSeen, t.Hash)
+		default:
+			if seen, ok := c.trackerSeen[t.Hash]; ok && time.Since(seen.at) < trackerMemory {
+				t.TrackerStatus, t.TrackerMessage = seen.status, seen.message
+			}
+		}
+	}
+	for h := range c.trackerSeen {
+		if !present[h] {
+			delete(c.trackerSeen, h)
+		}
+	}
 }
 
 func (t apiTorrent) toTorrent(hash string) client.Torrent {
@@ -314,28 +378,31 @@ func (t apiTorrent) toTorrent(hash string) client.Torrent {
 	if state == client.StateError {
 		msg = t.Message
 	}
+	trackerStatus, trackerMessage := trackerProblem(t.TrackerStatus)
 	return client.Torrent{
-		Hash:         strings.ToLower(hash),
-		Name:         t.Name,
-		State:        state,
-		RawState:     t.State,
-		Progress:     progress,
-		Size:         int64(t.TotalWanted),
-		Downloaded:   downloaded,
-		Uploaded:     int64(t.TotalUploaded),
-		DownloadRate: int64(t.DownloadRate),
-		UploadRate:   int64(t.UploadRate),
-		Ratio:        t.Ratio,
-		ETA:          eta,
-		Seeds:        int(t.NumSeeds),
-		Peers:        int(t.NumPeers),
-		Label:        t.Label,
-		Tags:         []string{},
-		Tracker:      client.TrackerDomain(t.TrackerHost),
-		SavePath:     path,
-		AddedAt:      int64(t.TimeAdded),
-		CompletedAt:  completed,
-		Message:      msg,
+		TrackerStatus:  trackerStatus,
+		TrackerMessage: trackerMessage,
+		Hash:           strings.ToLower(hash),
+		Name:           t.Name,
+		State:          state,
+		RawState:       t.State,
+		Progress:       progress,
+		Size:           int64(t.TotalWanted),
+		Downloaded:     downloaded,
+		Uploaded:       int64(t.TotalUploaded),
+		DownloadRate:   int64(t.DownloadRate),
+		UploadRate:     int64(t.UploadRate),
+		Ratio:          t.Ratio,
+		ETA:            eta,
+		Seeds:          int(t.NumSeeds),
+		Peers:          int(t.NumPeers),
+		Label:          t.Label,
+		Tags:           []string{},
+		Tracker:        client.TrackerDomain(t.TrackerHost),
+		SavePath:       path,
+		AddedAt:        int64(t.TimeAdded),
+		CompletedAt:    completed,
+		Message:        msg,
 	}
 }
 
@@ -438,9 +505,22 @@ func (c *Client) updateTotals(ctx context.Context) {
 		c.totalsMu.Unlock()
 	}
 
+	free := int64(-1)
+	var n float64
+	if res, err := c.rawCall(ctx, "core.get_free_space"); err == nil && json.Unmarshal(res, &n) == nil && n >= 0 {
+		free = int64(n)
+	}
+
 	c.totalsMu.Lock()
-	c.totals, c.haveTotals = totals, true
+	c.totals, c.haveTotals, c.freeSpace = totals, true, free
 	c.totalsMu.Unlock()
+}
+
+// FreeSpace is what Deluge reports as free in its download folder.
+func (c *Client) FreeSpace() (int64, bool) {
+	c.totalsMu.Lock()
+	defer c.totalsMu.Unlock()
+	return c.freeSpace, c.haveTotals && c.freeSpace >= 0
 }
 
 // Totals returns the totals seen during the last Torrents call.
