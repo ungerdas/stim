@@ -180,7 +180,10 @@ export interface TransferItem {
     | 'source-files-unchecked'
     | 'source-files-same'
     | 'not-moved-shared'
-    | 'not-moved-unchecked';
+    | 'not-moved-unchecked'
+    | 'group-pending'
+    | 'not-moved-group'
+    | 'kept-group';
   noteDetail?: string;
   shared?: number;
 }

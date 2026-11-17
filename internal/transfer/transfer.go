@@ -78,6 +78,11 @@ const (
 	// Why the files were not moved to the new folder on the same server.
 	NoteNotMovedShared    = "not-moved-shared"    // other torrents there use them
 	NoteNotMovedUnchecked = "not-moved-unchecked" // could not check whether others use them
+
+	// Cross-seeds moved together (see groups).
+	NoteGroupPending  = "group-pending"   // waits for the others with the same files
+	NoteNotMovedGroup = "not-moved-group" // not all of them made it, so the files stayed
+	NoteKeptGroup     = "kept-group"      // not all of them made it, so the old files stayed
 )
 
 // Job is one "move these torrents to that client" request.
@@ -371,12 +376,13 @@ func (e *Engine) setState(job *Job, i int, s State) {
 }
 
 func (e *Engine) run(ctx context.Context, job *Job) {
+	g := newGroups()
 	for i := range job.Items {
 		if ctx.Err() != nil {
 			e.setState(job, i, StateCancelled)
 			continue
 		}
-		err := e.moveOne(ctx, job, i)
+		err := e.moveOne(ctx, job, i, g)
 		e.update(job, i, func(it *Item) {
 			switch {
 			case err == nil:
@@ -395,6 +401,7 @@ func (e *Engine) run(ctx context.Context, job *Job) {
 		})
 		e.clients.Invalidate(job.TargetID, job.Items[i].SourceID)
 	}
+	e.finishAll(job, g)
 	e.mu.Lock()
 	job.FinishedAt = time.Now().Unix()
 	job.Cancelling = false
@@ -462,7 +469,7 @@ func (e *Engine) lookupTorrent(ctx context.Context, c client.Transferer, hash st
 // moveOne moves a single torrent. Until the source copy is removed, any
 // failure or cancellation rolls the target back, so the torrent is left
 // exactly as it was. After that point the move is always completed.
-func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
+func (e *Engine) moveOne(ctx context.Context, job *Job, i int, g *groups) error {
 	item := job.Items[i]
 	hash := item.Hash
 
@@ -613,21 +620,9 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 	if job.RemoveFromSource {
 		e.setState(job, i, StateRemoving)
 		deleteData := false
+		key := groupKey(srcInst, t)
 		if job.DeleteSourceFiles {
-			n, err := 0, error(nil)
-			if !made.sameFiles {
-				n, err = e.sharedFiles(steady, srcInst, t, nil)
-			}
-			switch {
-			case made.sameFiles:
-				e.update(job, i, func(it *Item) { it.Note = NoteSameFiles })
-			case err != nil:
-				e.update(job, i, func(it *Item) { it.Note, it.NoteDetail = NoteUnchecked, err.Error() })
-			case n > 0:
-				e.update(job, i, func(it *Item) { it.Note, it.Shared = NoteShared, n })
-			default:
-				deleteData = true
-			}
+			e.decideDelete(steady, job, i, g, key, srcInst, t, made.sameFiles, &deleteData)
 		}
 		if deleteData {
 			// Pick up settings stored during this move (the source's SSH
@@ -645,6 +640,15 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 		if err != nil {
 			sourceErr = fail(CodeSourceKept, "the target client has taken over, but the torrent could not be removed from the source client: %v", err)
 		}
+		if deleteData {
+			// The rest of the group waited for this: the old files are gone,
+			// unless removing them failed.
+			if err != nil {
+				e.finish(job, g, key, NoteKeptGroup, 0, "")
+			} else {
+				e.finish(job, g, key, "", 0, "")
+			}
+		}
 	}
 
 	// 6. Start seeding from the target.
@@ -655,26 +659,87 @@ func (e *Engine) moveOne(ctx context.Context, job *Job, i int) error {
 		return sourceErr
 	}
 
-	// 7. Optionally let the target move the data to a new folder, unless
-	// other torrents on the server use the same files (cross-seeds): moving
-	// them would leave those torrents without their data.
+	// 7. Optionally let the target move the data to a new folder. Files that
+	// other torrents use stay put, unless all of those are moved in this job
+	// too: then the last of them moves the files and the others follow.
 	if job.NewPath != "" && !samePath(job.NewPath, t.SavePath) {
-		isTarget := func(id, h string) bool {
-			return id == job.TargetID && strings.EqualFold(h, dstHash)
+		return e.moveFiles(steady, job, i, g, srcInst, t, dst, dstClient, dstHash)
+	}
+	return nil
+}
+
+// decideDelete settles whether removing a torrent copied to another server
+// also deletes its files on the old one.
+func (e *Engine) decideDelete(ctx context.Context, job *Job, i int, g *groups, key string, srcInst store.Instance, t client.Torrent, sameFiles bool, deleteData *bool) {
+	note := func(n, shared int, detail, code string) {
+		e.update(job, i, func(it *Item) { it.Note, it.Shared, it.NoteDetail = code, n, detail })
+		e.finish(job, g, key, code, shared, detail)
+	}
+	if sameFiles {
+		note(0, 0, "", NoteSameFiles)
+		return
+	}
+	sh, err := e.sharers(ctx, srcInst, t, nil)
+	if err != nil {
+		note(0, 0, err.Error(), NoteUnchecked)
+		return
+	}
+	later, outsiders := g.classify(job, i, sh, t, key)
+	switch {
+	case outsiders > 0:
+		note(outsiders, outsiders, "", NoteShared)
+	case later > 0:
+		e.update(job, i, func(it *Item) { it.Note = NoteGroupPending })
+		g.wait(key, i)
+	default:
+		*deleteData = true
+	}
+}
+
+// moveFiles is step 7: the target client moves the files to the new folder.
+func (e *Engine) moveFiles(ctx context.Context, job *Job, i int, g *groups, srcInst store.Instance, t client.Torrent, dst client.Transferer, dstClient client.Client, dstHash string) error {
+	key := groupKey(srcInst, t)
+	isSelf := func(id, h string) bool { return id == job.TargetID && strings.EqualFold(h, dstHash) }
+	sh, err := e.sharers(ctx, srcInst, t, isSelf)
+	if err != nil {
+		e.update(job, i, func(it *Item) { it.Note, it.NoteDetail = NoteNotMovedUnchecked, err.Error() })
+		e.finish(job, g, key, NoteNotMovedUnchecked, 0, err.Error())
+		return nil
+	}
+	later, outsiders := g.classify(job, i, sh, t, key)
+	switch {
+	case outsiders > 0:
+		e.update(job, i, func(it *Item) { it.Note, it.Shared = NoteNotMovedShared, outsiders })
+		e.finish(job, g, key, NoteNotMovedShared, outsiders, "")
+		return nil
+	case later > 0:
+		e.update(job, i, func(it *Item) { it.Note = NoteGroupPending })
+		g.wait(key, i)
+		return nil
+	}
+
+	// The last of its group, or alone. Stop the others while the files move
+	// out from under them, then point them at the new folder.
+	waiting := g.take(key)
+	var others []string
+	for _, k := range waiting {
+		others = append(others, job.Items[k].TargetHash)
+	}
+	if len(others) > 0 {
+		_ = e.call(ctx, func(ctx context.Context) error { return dstClient.Pause(ctx, others) })
+	}
+	e.setState(job, i, StateMoving)
+	if err := e.relocate(ctx, dst, dstHash, job.NewPath); err != nil {
+		if len(others) > 0 {
+			_ = e.call(ctx, func(ctx context.Context) error { return dstClient.Resume(ctx, others) })
+			for _, k := range waiting {
+				e.update(job, k, func(it *Item) { it.Note = NoteNotMovedGroup })
+			}
 		}
-		n, err := e.sharedFiles(steady, srcInst, t, isTarget)
-		switch {
-		case err != nil:
-			e.update(job, i, func(it *Item) { it.Note, it.NoteDetail = NoteNotMovedUnchecked, err.Error() })
-			return nil
-		case n > 0:
-			e.update(job, i, func(it *Item) { it.Note, it.Shared = NoteNotMovedShared, n })
-			return nil
-		}
-		e.setState(job, i, StateMoving)
-		if err := e.relocate(steady, dst, dstHash, job.NewPath); err != nil {
-			return fail(CodeMoveFailed, "the target client has taken over, but moving the files to %s failed: %v", job.NewPath, err)
-		}
+		return fail(CodeMoveFailed, "the target client has taken over, but moving the files to %s failed: %v", job.NewPath, err)
+	}
+	for _, k := range waiting {
+		e.repoint(ctx, job, k, dst, dstClient, job.NewPath)
 	}
 	return nil
 }

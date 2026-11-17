@@ -76,9 +76,17 @@ Velg torrenter, trykk **Flytt til …** og velg målklient. Stim flytter én tor
 Finner ikke målklienten alle filene, eller du avbryter før steg 4, fjernes kopien fra målklienten igjen og
 kilden er urørt.
 
-Bruker andre torrenter de samme filene, for eksempel samme utgivelse på flere trackere, flytter Stim bare den
-torrenten du valgte. De andre seeder videre som før. Med «Flytt filene til en annen mappe» blir filene i så
-fall liggende der de er, så de andre ikke mister dem, og fremdriftslisten sier fra. Kategori/etikett og tagger følger med der målklienten støtter det. Ufullstendige torrenter
+### Samme utgivelse på flere trackere
+
+Bruker andre torrenter nøyaktig de samme filene, for eksempel samme utgivelse på flere trackere, tilbyr
+dialogen å **ta dem med** (på som standard). Da flyttes de sammen, og filene flyttes eller kopieres bare én
+gang: den siste av dem flytter filene, og de andre pekes dit og sjekkes på nytt før de starter igjen. Ved
+flytting mellom servere slettes de gamle filene først når den siste har flyttet.
+
+Tar du dem ikke med, flytter Stim bare torrenten du valgte, og de andre seeder videre som før. Filene blir
+da liggende der de er, også med «Flytt filene til en annen mappe» eller «Slett filene på den gamle
+serveren», så de andre ikke mister dem. Det samme gjelder hvis en av dem ikke lar seg flytte, eller hvis
+filene bare delvis overlapper (en episode seedet fra inni en sesongpakke). Fremdriftslisten sier fra. Kategori/etikett og tagger følger med der målklienten støtter det. Ufullstendige torrenter
 hoppes over.
 
 Under **Filene** velger du om klientene deler disk:

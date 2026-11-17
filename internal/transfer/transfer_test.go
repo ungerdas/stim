@@ -16,6 +16,19 @@ import (
 
 const fileData = "d8:announce18:http://t.example/a4:infod6:lengthi5e4:name5:a.mkv12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaa7:privatei1eee"
 
+// fileData2 is the same files as another torrent, as a tracker's own
+// "source" tag makes it: a cross-seed.
+const fileData2 = "d8:announce18:http://u.example/a4:infod6:lengthi5e4:name5:a.mkv12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaa7:privatei1e6:source2:NBee"
+
+func hashOf(t *testing.T, data string) string {
+	t.Helper()
+	f, err := torrentfile.Parse([]byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f.InfoHashes()[0]
+}
+
 func testHash(t *testing.T) string {
 	t.Helper()
 	f, err := torrentfile.Parse([]byte(fileData))
@@ -40,6 +53,8 @@ type fake struct {
 	// test SSH server serves) instead of reporting dataFound.
 	onDisk      bool
 	removedData []string // hashes removed together with their files
+	cross       string   // the hash whose .torrent is fileData2
+	moves       []string // hashes asked to move
 }
 
 func newFake() *fake { return &fake{torrents: map[string]client.Torrent{}, dataFound: 1, checkFor: 2} }
@@ -104,7 +119,12 @@ func (f *fake) Torrent(_ context.Context, hash string) (client.Torrent, bool, er
 	return t, ok, nil
 }
 
-func (f *fake) ExportTorrent(context.Context, string) ([]byte, error) { return []byte(fileData), nil }
+func (f *fake) ExportTorrent(_ context.Context, hash string) ([]byte, error) {
+	if hash == f.cross {
+		return []byte(fileData2), nil
+	}
+	return []byte(fileData), nil
+}
 
 func (f *fake) AddStopped(_ context.Context, data []byte, opts client.AddOptions) error {
 	tf, err := torrentfile.Parse(data)
@@ -142,6 +162,7 @@ func (f *fake) RemoveKeepData(_ context.Context, hash string) error {
 func (f *fake) Move(_ context.Context, hash, p string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.moves = append(f.moves, hash)
 	t := f.torrents[hash]
 	t.SavePath = p
 	f.torrents[hash] = t
@@ -394,5 +415,83 @@ func TestNewFolderLeavesCrossSeededFiles(t *testing.T) {
 	}
 	if src.has(hash) || !src.has("other") {
 		t.Error("only the moved torrent should leave the source")
+	}
+}
+
+// crossSeed adds a second torrent of the same files to the source.
+func crossSeed(t *testing.T, src *fake, dir string) (string, Request) {
+	t.Helper()
+	h2 := hashOf(t, fileData2)
+	src.cross = h2
+	src.torrents[h2] = client.Torrent{Hash: h2, Name: "a.mkv", State: client.StateSeeding, Progress: 1, SavePath: dir}
+	return h2, Request{}
+}
+
+func addItem(r *Request, hash string) {
+	r.Items = append(r.Items, struct {
+		InstanceID string `json:"instanceId"`
+		Hash       string `json:"hash"`
+		Name       string `json:"name"`
+	}{"src", hash, "a.mkv"})
+}
+
+func waitJob(t *testing.T, e *Engine, id string) Job {
+	t.Helper()
+	wait(t, e, id)
+	for _, j := range e.Jobs() {
+		if j.ID == id {
+			return j
+		}
+	}
+	return Job{}
+}
+
+func TestCrossSeedsMoveToNewFolderTogether(t *testing.T) {
+	e, src, dst, hash := setup(t)
+	h2, _ := crossSeed(t, src, "/data")
+	r := request(hash, true, "/ssd")
+	addItem(&r, h2)
+	job, err := e.Start(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := waitJob(t, e, job.ID)
+	for _, it := range j.Items {
+		if it.State != StateDone || it.Note != "" {
+			t.Errorf("item %+v", it)
+		}
+	}
+	for _, h := range []string{hash, h2} {
+		got, _, _ := dst.Torrent(context.Background(), h)
+		if got.SavePath != "/ssd" || got.State != client.StateSeeding {
+			t.Errorf("%s in target = %+v", h, got)
+		}
+	}
+	if len(src.torrents) != 0 {
+		t.Error("both should have left the source")
+	}
+	// The last one moves the files; the first is pointed at them afterwards.
+	if len(dst.moves) != 2 || dst.moves[0] != h2 || dst.moves[1] != hash {
+		t.Errorf("moves = %v", dst.moves)
+	}
+}
+
+func TestCrossSeedGroupStaysWhenOneFails(t *testing.T) {
+	e, src, dst, hash := setup(t)
+	h2, _ := crossSeed(t, src, "/data")
+	dst.torrents[h2] = client.Torrent{Hash: h2, Name: "a.mkv", SavePath: "/data"} // already there: a duplicate
+	r := request(hash, true, "/ssd")
+	addItem(&r, h2)
+	job, _ := e.Start(r)
+	j := waitJob(t, e, job.ID)
+	if j.Items[0].State != StateDone || j.Items[0].Note != NoteNotMovedGroup {
+		t.Errorf("first = %+v", j.Items[0])
+	}
+	if j.Items[1].State != StateFailed || j.Items[1].Code != CodeDuplicate {
+		t.Errorf("second = %+v", j.Items[1])
+	}
+	got, _, _ := dst.Torrent(context.Background(), hash)
+	if got.SavePath != "/data" || len(dst.moves) != 0 {
+		t.Errorf("files must stay for the torrent left in the source: %+v, moves %v", got, dst.moves)
 	}
 }

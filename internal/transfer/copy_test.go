@@ -238,3 +238,40 @@ func TestCopyNeverOverwritesOtherFiles(t *testing.T) {
 		t.Error("the source should be untouched")
 	}
 }
+
+func TestCrossSeedsCopiedTogetherDeleteOldFilesOnce(t *testing.T) {
+	e, _, src, dst, hash, dir := across(t)
+	h2, _ := crossSeed(t, src, filepath.Join(dir, "A"))
+	target := filepath.Join(dir, "B")
+	r := copyRequest(hash, target, true)
+	addItem(&r, h2)
+	job, err := e.Start(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := waitJob(t, e, job.ID)
+	for _, it := range j.Items {
+		if it.State != StateDone || it.Note != "" {
+			t.Errorf("item %+v", it)
+		}
+	}
+	if len(src.removedData) != 1 || src.removedData[0] != h2 || exists(filepath.Join(dir, "A", "a.mkv")) {
+		t.Errorf("the last one should delete the old files: %v", src.removedData)
+	}
+	if !dst.has(hash) || !dst.has(h2) {
+		t.Error("both should be in the target")
+	}
+	if j.Items[1].CopyDone != 5 || j.Items[1].CopyTotal != 5 {
+		t.Errorf("second copy = %+v", j.Items[1])
+	}
+}
+
+func TestCrossSeedLeftBehindKeepsOldFiles(t *testing.T) {
+	e, _, src, _, hash, dir := across(t)
+	crossSeed(t, src, filepath.Join(dir, "A")) // not part of the move
+	job, _ := e.Start(copyRequest(hash, filepath.Join(dir, "B"), true))
+	it := wait(t, e, job.ID)
+	if it.State != StateDone || it.Note != NoteShared || it.Shared != 1 || len(src.removedData) != 0 {
+		t.Fatalf("got %+v", it)
+	}
+}

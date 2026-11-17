@@ -659,6 +659,7 @@ export default function App() {
           instances={instances}
           colorOf={colorOf}
           torrents={selectedTorrents}
+          allTorrents={torrents}
           onClose={closeMove}
           onStarted={(job) => {
             setMoveOpen(false);

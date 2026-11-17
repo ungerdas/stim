@@ -757,6 +757,20 @@ input[type='radio'] {
   color: var(--bad);
 }
 
+.siblings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+
+.siblings .hint {
+  padding-left: 24px;
+}
+
 .transfer-where {
   display: block;
   color: var(--ink-soft);

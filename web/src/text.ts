@@ -95,6 +95,12 @@ export function transferNote(item: TransferItem): string | null {
       return 'Filene på den gamle serveren er beholdt fordi målklienten bruker de samme filene.';
     case 'not-moved-shared':
       return `Filene er ikke flyttet til den nye mappen fordi ${item.shared === 1 ? 'en annen torrent' : `${item.shared} andre torrenter`} bruker dem. Målklienten seeder fra der de lå.`;
+    case 'group-pending':
+      return 'Venter på de andre torrentene med de samme filene.';
+    case 'not-moved-group':
+      return 'Filene er ikke flyttet til den nye mappen fordi ikke alle torrentene som bruker dem, ble flyttet. Målklienten seeder fra der de lå.';
+    case 'kept-group':
+      return 'Filene på den gamle serveren er beholdt fordi ikke alle torrentene som bruker dem, ble flyttet.';
     case 'not-moved-unchecked':
       return 'Filene er ikke flyttet til den nye mappen: Stim fikk ikke sjekket om andre torrenter bruker dem. Målklienten seeder fra der de lå.';
     default:

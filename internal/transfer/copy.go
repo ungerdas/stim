@@ -270,13 +270,13 @@ func overlaps(a, b string) bool {
 	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
-// sharedFiles counts the other torrents, in any client on the source
-// server, whose files overlap the moved torrent's: cross-seeds of the same
-// files on other trackers, or a single episode seeded from inside a season
-// pack. Their files must stay where they are. skip leaves out the moved
-// torrent's own entry in the target client, when the target is on the same
-// server.
-func (e *Engine) sharedFiles(ctx context.Context, srcInst store.Instance, t client.Torrent, skip func(instanceID, hash string) bool) (int, error) {
+// sharers lists the other torrents, in any client on the source server,
+// whose files overlap the moved torrent's: cross-seeds of the same files on
+// other trackers, or a single episode seeded from inside a season pack.
+// Their files must not move or disappear under them. skip leaves out the
+// moved torrent's own entry in the target client, when the target is on the
+// same server.
+func (e *Engine) sharers(ctx context.Context, srcInst store.Instance, t client.Torrent, skip func(instanceID, hash string) bool) ([]sharer, error) {
 	ids := []string{srcInst.ID}
 	if l, ok := e.clients.(lister); ok {
 		server := srcInst.Server()
@@ -287,7 +287,7 @@ func (e *Engine) sharedFiles(ctx context.Context, srcInst store.Instance, t clie
 		}
 	}
 	ours := path.Join(t.SavePath, t.Name)
-	n := 0
+	var out []sharer
 	for _, id := range ids {
 		c, inst, ok := e.clients.Lookup(id)
 		if !ok {
@@ -300,7 +300,7 @@ func (e *Engine) sharedFiles(ctx context.Context, srcInst store.Instance, t clie
 			return err
 		})
 		if err != nil {
-			return 0, fmt.Errorf("%s: %w", inst.Name, err)
+			return nil, fmt.Errorf("%s: %w", inst.Name, err)
 		}
 		for _, o := range list {
 			if id == srcInst.ID && (strings.EqualFold(o.Hash, t.Hash) || (t.AltHash != "" && strings.EqualFold(o.Hash, t.AltHash))) {
@@ -310,9 +310,9 @@ func (e *Engine) sharedFiles(ctx context.Context, srcInst store.Instance, t clie
 				continue
 			}
 			if o.SavePath != "" && overlaps(path.Join(o.SavePath, o.Name), ours) {
-				n++
+				out = append(out, sharer{instanceID: id, hash: o.Hash, savePath: o.SavePath, name: o.Name})
 			}
 		}
 	}
-	return n, nil
+	return out, nil
 }

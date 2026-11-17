@@ -8,6 +8,8 @@ interface Props {
   instances: InstanceStatus[];
   colorOf: (instanceId: string) => string;
   torrents: Torrent[];
+  /** Every torrent, to find others that use the same files (cross-seeds). */
+  allTorrents: Torrent[];
   onClose: () => void;
   onStarted: (job: TransferJob) => void;
   onEditInstance: (id: string) => void;
@@ -17,7 +19,20 @@ type Mode = 'same' | 'copy';
 
 const plural = (n: number, one: string, many: string) => `${count(n)} ${n === 1 ? one : many}`;
 
-export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onStarted, onEditInstance }: Props) {
+/** "a", "a og b", "a, b og c" */
+const joinAnd = (items: string[]) =>
+  items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} og ${items[items.length - 1]}`;
+
+export function MoveDialog({
+  kinds,
+  instances,
+  colorOf,
+  torrents,
+  allTorrents,
+  onClose,
+  onStarted,
+  onEditInstance,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [configs, setConfigs] = useState<InstanceConfig[] | null>(null);
   const [targetId, setTargetId] = useState('');
@@ -28,6 +43,7 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
   const [targetPath, setTargetPath] = useState('');
   const [pathTouched, setPathTouched] = useState(false);
   const [deleteSourceFiles, setDeleteSourceFiles] = useState(false);
+  const [withSiblings, setWithSiblings] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,11 +85,29 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
   const kindOf = (kind: string | undefined) => kinds.find((k) => k.kind === kind);
 
   const plan = useMemo(() => {
+    const cfg = (id: string) => configs?.find((c) => c.id === id);
     const onTarget = torrents.filter((t) => t.instanceId === targetId);
     const incomplete = torrents.filter((t) => t.instanceId !== targetId && t.progress < 1);
-    const movable = torrents.filter((t) => t.instanceId !== targetId && t.progress >= 1);
+    const chosen = torrents.filter((t) => t.instanceId !== targetId && t.progress >= 1);
+
+    // Other torrents with exactly the same files on the same server: the
+    // same release on other trackers. Moved along, the files move once.
+    const filesKey = (t: Torrent) =>
+      `${cfg(t.instanceId)?.server || t.instanceId}\u0000${t.savePath.replace(/\/+$/, '')}\u0000${t.name}`;
+    const chosenFiles = new Set(chosen.map(filesKey));
+    const picked = new Set(torrents.map((t) => `${t.instanceId}:${t.hash}`));
+    const online = new Set(instances.filter((i) => i.online).map((i) => i.id));
+    const siblings = allTorrents.filter(
+      (t) =>
+        !picked.has(`${t.instanceId}:${t.hash}`) &&
+        t.instanceId !== targetId &&
+        t.progress >= 1 &&
+        online.has(t.instanceId) &&
+        chosenFiles.has(filesKey(t)),
+    );
+    const movable = withSiblings ? [...chosen, ...siblings] : chosen;
+
     const sourceIds = [...new Set(movable.map((t) => t.instanceId))];
-    const cfg = (id: string) => configs?.find((c) => c.id === id);
     // Clients whose API cannot hand out .torrent files need SSH to be moved from at all.
     const needsSSH = sourceIds.filter((id) => {
       const inst = instances.find((i) => i.id === id);
@@ -88,9 +122,11 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
       return s !== '' && targetServer !== '' && s !== targetServer;
     });
     const paths = [...new Set(movable.map((t) => t.savePath))];
-    const size = movable.reduce((sum, t) => sum + t.size, 0);
-    return { onTarget, incomplete, movable, sourceIds, needsSSH, otherServer, paths, size };
-  }, [torrents, targetId, instances, configs, kinds]);
+    // Cross-seeds share their files, so those are copied once.
+    const unique = new Map(movable.map((t) => [filesKey(t), t.size]));
+    const size = [...unique.values()].reduce((sum, n) => sum + n, 0);
+    return { onTarget, incomplete, chosen, siblings, movable, sourceIds, needsSSH, otherServer, paths, size };
+  }, [torrents, allTorrents, targetId, instances, configs, kinds, withSiblings]);
 
   const copying = mode === 'copy';
   const targetConfig = configOf(targetId);
@@ -218,6 +254,27 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
             </p>
           )}
 
+          {targetId && plan.siblings.length > 0 && (
+            <div className="siblings">
+              <label className="check">
+                <input type="checkbox" checked={withSiblings} onChange={(e) => setWithSiblings(e.target.checked)} />
+                <span>
+                  Ta med {plural(plan.siblings.length, 'annen torrent', 'andre torrenter')} som bruker de samme
+                  filene
+                </span>
+              </label>
+              <p className="hint">
+                {joinAnd([...new Set(plan.siblings.map((t) => t.tracker || 'ukjent tracker'))])} i{' '}
+                {joinAnd([...new Set(plan.siblings.map((t) => nameOf(t.instanceId)))])}.{' '}
+                {withSiblings
+                  ? 'Filene flyttes én gang for alle.'
+                  : moveFiles || (copying && deleteSourceFiles)
+                    ? 'Uten dem blir filene liggende der de er, så de andre ikke mister dem.'
+                    : 'De blir da værende der de er og seeder videre.'}
+              </p>
+            </div>
+          )}
+
           {plan.needsSSH.map((id) =>
             setUp(
               id,
@@ -334,8 +391,7 @@ export function MoveDialog({ kinds, instances, colorOf, torrents, onClose, onSta
                   />
                   <span className="hint">
                     {plan.paths.length > 0 && `Ligger nå i ${plan.paths.slice(0, 3).join(', ')}. `}
-                    Filer som andre torrenter også bruker, for eksempel samme utgivelse på en annen tracker, blir
-                    liggende der de er.
+                    Bruker andre torrenter som ikke flyttes med, de samme filene, blir filene liggende der de er.
                   </span>
                 </label>
               )}
