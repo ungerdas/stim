@@ -167,7 +167,10 @@ SSH-innloggingen gir full tilgang til kontoen på serveren, og den lagres i klar
 
 ## Kryss-seeds i listen
 
-Torrenter med samme navn og størrelse regnes som samme utgivelse, for eksempel seedet på flere trackere.
+Torrenter med samme navn og omtrent samme størrelse regnes som samme utgivelse, for eksempel seedet på flere
+trackere. Navn sammenlignes uten forskjell på store og små bokstaver, punktum, mellomrom og understrek, og
+uten filendelse (`.mkv`). Størrelsene kan skille med opptil 2 %, som i cross-seed, fordi én tracker kan ha
+en `.nfo` eller sample som en annen mangler.
 Med **Samle kryss-seeds** på (standard, valget huskes i nettleseren) vises de som én rad:
 
 - **Tracker** viser alle trackerne, og merket ved navnet sier hvor mange

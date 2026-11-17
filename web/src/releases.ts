@@ -5,6 +5,10 @@ import { torrentKey } from './duplicates';
  * The same release seeded as several torrents: on several trackers
  * (cross-seeding), or as copies in several clients. Recognised by name and
  * size, so it also covers copies on different servers.
+ *
+ * Cross-seed tools accept torrents that differ a little: one has an .nfo or
+ * a sample the other lacks, or the tracker wrote the name in another case or
+ * with spaces. So names are compared loosely and sizes within SIZE_TOLERANCE.
  */
 export interface Release {
   key: string;
@@ -19,7 +23,51 @@ export type TableRow =
   | { type: 'torrent'; torrent: Torrent; child: boolean }
   | { type: 'release'; release: Release; open: boolean };
 
-export const releaseKey = (t: Torrent) => `${t.name}\u0000${t.size}`;
+// cross-seed's own default for how far sizes may differ.
+const SIZE_TOLERANCE = 0.02;
+
+const VIDEO_EXTENSION = /\.(mkv|mp4|m4v|avi|ts|m2ts|wmv)$/i;
+
+/** "Farmen S21 NORWEGiAN" and "farmen.s21.norwegian.mkv" compare equal. */
+export const looseName = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(VIDEO_EXTENSION, '')
+    .replace(/[\s._]+/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+
+/**
+ * Splits torrents into releases: same loose name, and sizes within
+ * SIZE_TOLERANCE of the smallest in the release. Torrents with no size yet
+ * (a magnet still fetching its metadata) stay on their own.
+ */
+function groupReleases(torrents: Torrent[]): Map<string, Torrent[]> {
+  const byName = new Map<string, Torrent[]>();
+  const out = new Map<string, Torrent[]>();
+  for (const t of torrents) {
+    if (t.size <= 0) {
+      out.set(`single\u0000${torrentKey(t)}`, [t]);
+      continue;
+    }
+    const n = looseName(t.name);
+    const list = byName.get(n);
+    if (list) list.push(t);
+    else byName.set(n, [t]);
+  }
+  for (const [name, list] of byName) {
+    const bySize = [...list].sort((a, b) => a.size - b.size);
+    let start = 0;
+    for (let i = 1; i <= bySize.length; i++) {
+      const smallest = bySize[start].size;
+      if (i < bySize.length && bySize[i].size - smallest <= bySize[i].size * SIZE_TOLERANCE) continue;
+      // Members keep the list's order, so they show up sorted like the rest.
+      const members = new Set(bySize.slice(start, i));
+      out.set(`${name}\u0000${smallest}`, list.filter((t) => members.has(t)));
+      start = i;
+    }
+  }
+  return out;
+}
 
 /** Keys of the torrents a row stands for, in display order. */
 export const rowKeys = (row: TableRow): string[] =>
@@ -37,6 +85,7 @@ const uniqueSorted = (values: string[]) =>
 
 function summarize(key: string, members: Torrent[]): Release {
   const first = members[0];
+  const size = Math.max(...members.map((t) => t.size));
   const trackers = uniqueSorted(members.map((t) => t.tracker));
   const instanceIds = [...new Set(members.map((t) => t.instanceId))];
   const uploaded = members.reduce((n, t) => n + t.uploaded, 0);
@@ -49,13 +98,14 @@ function summarize(key: string, members: Torrent[]): Release {
     altHash: undefined,
     instanceId: instanceIds.length === 1 ? instanceIds[0] : '',
     state,
+    size,
     rawState: '',
     message: '',
     progress: Math.min(...members.map((t) => t.progress)),
     downloaded: members.reduce((n, t) => n + t.downloaded, 0),
     uploaded,
     // How many times the files have gone out, counting every tracker.
-    ratio: first.size > 0 ? uploaded / first.size : 0,
+    ratio: size > 0 ? uploaded / size : 0,
     downloadRate: members.reduce((n, t) => n + t.downloadRate, 0),
     uploadRate: members.reduce((n, t) => n + t.uploadRate, 0),
     eta: downloading.length > 0 ? Math.max(...downloading.map((t) => t.eta)) : -1,
@@ -82,14 +132,7 @@ export function buildRows(
 ): TableRow[] {
   if (!grouping) return sorted.map((torrent) => ({ type: 'torrent', torrent, child: false }));
 
-  const byKey = new Map<string, Torrent[]>();
-  for (const t of sorted) {
-    const k = releaseKey(t);
-    const list = byKey.get(k);
-    if (list) list.push(t);
-    else byKey.set(k, [t]);
-  }
-
+  const byKey = groupReleases(sorted);
   const top: { sortAs: Torrent; row: TableRow }[] = [];
   for (const [key, members] of byKey) {
     if (members.length === 1) {
