@@ -158,7 +158,230 @@ input[type='radio'] {
 }
 
 .brand {
-  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px 0 8px;
+}
+
+.settings-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--side-edge);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-open:hover,
+.settings-open:focus-visible {
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/* ---------- settings page ---------- */
+
+.settings {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  overflow-y: auto;
+  padding: 36px 48px 64px;
+  scrollbar-color: #3a3a3a transparent;
+}
+
+.settings > * {
+  max-width: 920px;
+}
+
+.settings-head {
+  margin-bottom: 36px;
+}
+
+.settings-back {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.settings-title {
+  margin-top: 14px;
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+
+.settings-section {
+  padding: 26px 0 30px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-heading {
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.settings-section > .hint {
+  margin-top: 8px;
+}
+
+.settings-list {
+  margin-top: 14px;
+}
+
+.settings-client,
+.settings-server {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 210px 200px auto;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+.settings-server {
+  grid-template-columns: minmax(0, 1fr) 210px auto;
+}
+
+.settings-list > li:first-child {
+  border-top: 0;
+}
+
+.settings-client-main,
+.settings-server-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.settings-client-name {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.settings-client-kind {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.settings-client-facts {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.settings-client-ssh {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.settings-warn {
+  color: var(--queued);
+}
+
+.settings-bad {
+  color: var(--bad);
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  margin-top: 3px;
+}
+
+.settings-toggle > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-toggle-name {
+  font-weight: 600;
+}
+
+.settings-section > .hint:last-child {
+  margin-top: 14px;
+}
+
+.settings-about {
+  margin-top: 10px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.settings-about a {
+  color: var(--ink);
+}
+
+@media (max-width: 760px) {
+  .settings {
+    padding: 22px 16px 48px;
+  }
+
+  .settings-title {
+    font-size: 30px;
+  }
+
+  .settings-client {
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'dot main edit'
+      '. facts facts'
+      '. ssh ssh';
+    row-gap: 4px;
+  }
+
+  .settings-client > .inst-dot {
+    grid-area: dot;
+  }
+
+  .settings-client > .settings-client-main {
+    grid-area: main;
+  }
+
+  .settings-client > .settings-client-facts {
+    grid-area: facts;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0 12px;
+  }
+
+  .settings-client > .settings-client-ssh {
+    grid-area: ssh;
+  }
+
+  .settings-client > .settings-edit {
+    grid-area: edit;
+  }
+
+  .settings-server {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .settings-server .settings-client-facts {
+    grid-column: 1 / -1;
+  }
 }
 
 .brand-name {

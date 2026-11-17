@@ -1,4 +1,4 @@
-import type { InstanceStatus, KindInfo, State } from '../types';
+import type { InstanceStatus, State } from '../types';
 import { bytes, count, ratio } from '../format';
 import { instanceProblemShort, stateLabel } from '../text';
 
@@ -6,7 +6,6 @@ export type StateFilter = State | 'all' | 'active' | 'duplicates' | 'unregistere
 
 interface Props {
   instances: InstanceStatus[];
-  kinds: KindInfo[];
   colorOf: (instanceId: string) => string;
   total: number;
   instanceFilter: string;
@@ -14,10 +13,7 @@ interface Props {
   stateFilter: StateFilter;
   stateCounts: Record<StateFilter, number>;
   onStateFilter: (s: StateFilter) => void;
-  onAdd: () => void;
-  onEdit: (id: string) => void;
-  /** Opens the search for files no torrent uses, on one server. */
-  onCleanUp: (server: string) => void;
+  onOpenSettings: () => void;
   trackers: TrackerCount[];
   hiddenTrackers: Set<string>;
   onToggleTracker: (tracker: string) => void;
@@ -45,13 +41,6 @@ const EXTRA_STATES: StateFilter[] = ['queued', 'checking', 'moving', 'unknown'];
 // Below this, the free space is shown as a warning: a season pack or two.
 const LOW_SPACE = 50 * 2 ** 30;
 
-const buildStamp = new Intl.DateTimeFormat('nb-NO', {
-  day: 'numeric',
-  month: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-}).format(new Date(__BUILD_TIME__));
-
 function stateFilterLabel(s: StateFilter): string {
   if (s === 'all') return 'Alle';
   if (s === 'active') return 'Aktive nå';
@@ -62,10 +51,8 @@ function stateFilterLabel(s: StateFilter): string {
 }
 
 export function Sidebar(props: Props) {
-  const { instances, kinds, colorOf, stateCounts } = props;
-  const kindLabel = (kind: string) => kinds.find((k) => k.kind === kind)?.label ?? kind;
+  const { instances, colorOf, stateCounts } = props;
   const shown = (s: StateFilter) => stateCounts[s] > 0 || props.stateFilter === s;
-  const servers = [...new Set(instances.map((i) => i.server).filter(Boolean))].sort();
   const states = [
     ...FIXED_STATES.slice(0, 2),
     ...CONDITIONAL.filter(shown),
@@ -77,7 +64,15 @@ export function Sidebar(props: Props) {
     <aside className="sidebar">
       <div className="brand">
         <span className="brand-name">Stim</span>
-        <span className="side-build">Bygget {buildStamp}</span>
+        <button type="button" className="settings-open" onClick={props.onOpenSettings}>
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M8.6 1.5h2.8l.4 2.3c.5.2 1 .5 1.4.8l2.2-.8 1.4 2.4-1.8 1.5a6 6 0 0 1 0 1.6l1.8 1.5-1.4 2.4-2.2-.8c-.4.3-.9.6-1.4.8l-.4 2.3H8.6l-.4-2.3c-.5-.2-1-.5-1.4-.8l-2.2.8-1.4-2.4L5 9.4a6 6 0 0 1 0-1.6L3.2 6.3l1.4-2.4 2.2.8c.4-.3.9-.6 1.4-.8l.4-2.4ZM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"
+            />
+          </svg>
+          Innstillinger
+        </button>
       </div>
 
       <section className="side-summary" aria-labelledby="side-summary-heading">
@@ -114,7 +109,7 @@ export function Sidebar(props: Props) {
             </button>
           </li>
           {instances.map((inst) => (
-            <li key={inst.id} className="side-row">
+            <li key={inst.id}>
               <button
                 type="button"
                 className="side-item"
@@ -124,62 +119,21 @@ export function Sidebar(props: Props) {
                 <span className="inst-dot" style={{ background: colorOf(inst.id) }} aria-hidden="true" />
                 <span className="side-item-main">
                   <span className="side-item-name">{inst.name}</span>
-                  {inst.online ? (
-                    <>
-                      <span className="side-item-sub">
-                        {kindLabel(inst.kind)}
-                        {inst.version ? ` ${inst.version}` : ''}
-                      </span>
-                      {inst.freeSpace >= 0 && (
-                        <span
-                          className={`side-item-sub side-free${inst.freeSpace < LOW_SPACE ? ' is-low' : ''}`}
-                          title={inst.server ? `Ledig plass på ${inst.server}, der klienten lagrer nye torrenter` : undefined}
-                        >
-                          {bytes(inst.freeSpace)} ledig
-                        </span>
-                      )}
-                    </>
-                  ) : (
+                  {!inst.online ? (
                     <span className="side-item-sub side-item-problem">{instanceProblemShort(inst)}</span>
+                  ) : (
+                    inst.freeSpace >= 0 &&
+                    inst.freeSpace < LOW_SPACE && (
+                      <span className="side-item-sub side-free is-low">Bare {bytes(inst.freeSpace)} ledig</span>
+                    )
                   )}
                 </span>
                 <span className="side-count">{count(inst.count)}</span>
               </button>
-              <button
-                type="button"
-                className="side-edit"
-                onClick={() => props.onEdit(inst.id)}
-                aria-label={`Endre ${inst.name}`}
-              >
-                Endre
-              </button>
             </li>
           ))}
         </ul>
-        <button type="button" className="btn side-add" onClick={props.onAdd}>
-          Legg til klient
-        </button>
       </nav>
-
-      {servers.length > 0 && (
-        <section className="side-section" aria-labelledby="side-servers">
-          <h2 id="side-servers" className="side-heading">
-            Servere
-          </h2>
-          <ul className="side-list">
-            {servers.map((s) => (
-              <li key={s} className="side-server">
-                <span className="side-server-name" title={s}>
-                  {s}
-                </span>
-                <button type="button" className="side-heading-action" onClick={() => props.onCleanUp(s)}>
-                  Rydd opp
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
       <nav className="side-section" aria-labelledby="side-states">
         <h2 id="side-states" className="side-heading">

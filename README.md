@@ -24,11 +24,12 @@ Tidlig skjelett. Dette fungerer:
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
 - trackerfilter: huk av hvilke trackere som skal vises (valget huskes i nettleseren)
 - trackerfeil og avregistrerte torrenter: egne filtre, markering i listen og trackerens egen melding
-- ledig plass per klient i sidemenyen, gul når det er under 50 GiB igjen
+- egen innstillingsside (tannhjulet ved navnet) for klienter, servere og visning, så forsiden bare har listen
+- ledig plass per klient under Innstillinger, og i sidemenyen når det er under 50 GiB igjen
 - filer uten torrent: finn og slett rester i nedlastingsmappene på en server (over SSH)
 - detaljpanel med oversikt, filer, trackere og peers (klikk på navnet)
 - kryss-seeds samlet: samme utgivelse på flere trackere vises som én rad med trackerne, summert opplastet og
-  samlet ratio, og kan foldes ut (slås av med «Samle kryss-seeds»)
+  samlet ratio, og kan foldes ut (slås av under Innstillinger)
 - hvor mye som er lastet opp: for utvalget i sidemenyen, og per tracker og klient under «Se statistikk»
 - pause og gjenoppta, også på tvers av klienter i samme operasjon
 - slette torrenter, med eller uten filene, med varsel når andre torrenter bruker de samme filene
@@ -52,7 +53,8 @@ mkdir -p config          # må eies av brukeren containeren kjører som (UID 100
 docker compose up -d --build
 ```
 
-Åpne `http://<server>:7846` og velg **Legg til klient**.
+Åpne `http://<server>:7846` og velg **Legg til klient**. Senere legger du til og endrer klienter under
+**Innstillinger** (tannhjulet ved navnet øverst i sidemenyen, eller `/#innstillinger`).
 
 - **qBittorrent:** adressen til WebUI-et, f.eks. `http://192.168.1.10:8080`, pluss brukernavn og passord.
 - **Deluge:** adressen til webgrensesnittet, f.eks. `http://192.168.1.10:8112`, pluss passordet til
@@ -154,7 +156,7 @@ de samme stiene, ellers finner ikke Stim torrentfilen.
 
 qBittorrent gir fra seg `.torrent`-filen over API-et (4.5 og nyere). Deluge gjør ikke det, så for å flytte
 **fra** Deluge henter Stim filen fra Deluges `state`-mappe på serveren over SFTP. Fyll inn under
-**Endre → SSH-tilgang** på Deluge-klienten:
+**Innstillinger → Endre → SSH-tilgang** på Deluge-klienten:
 
 - **SSH-vert, port, brukernavn** og enten **passord** eller **privat nøkkel** (uten passordfrase)
 - **Mappen med torrentfilene**, vanligvis `.config/deluge/state` relativt til hjemmemappen. Har du flere
@@ -190,14 +192,15 @@ meldingen vises når du holder musen over eller åpner detaljene.
 
 ## Ledig plass
 
-Under hver klient i sidemenyen står plassen som er igjen der klienten lagrer nye torrenter: fra
-qBittorrent og Deluge direkte, fra Transmission hvert 30. sekund, og fra rTorrent via en torrent som kjører
-i standardmappen. Under 50 GiB vises tallet i gult.
+Under **Innstillinger** står plassen som er igjen der hver klient lagrer nye torrenter, og i sidemenyen
+vises den under klienten når det er under 50 GiB igjen. Tallet kommer fra qBittorrent og Deluge direkte,
+fra Transmission hvert 30. sekund, og fra rTorrent via en torrent som kjører i standardmappen.
 
 ## Filer uten torrent
 
-Under **Servere** i sidemenyen har hver server **Rydd opp**. Stim logger inn over SSH og lister mappene som
-torrentene på serveren lagres i, og sammenligner med torrentene i *alle* klientene i Stim:
+Under **Innstillinger → Servere** har hver server **Finn filer uten torrent**. Stim logger inn over SSH,
+lister mappene som torrentene på serveren lagres i, og sammenligner med torrentene i *alle* klientene i
+Stim:
 
 - Bare det som ligger rett i disse mappene sammenlignes. En mappe som hører til en torrent, får være i fred i
   sin helhet, også om den har ekstra filer. Mapper inne i en torrents egen mappe ses ikke gjennom.
@@ -224,7 +227,8 @@ Torrenter med samme navn og omtrent samme størrelse regnes som samme utgivelse,
 trackere. Navn sammenlignes uten forskjell på store og små bokstaver, punktum, mellomrom og understrek, og
 uten filendelse (`.mkv`). Størrelsene kan skille med opptil 2 %, som i cross-seed, fordi én tracker kan ha
 en `.nfo` eller sample som en annen mangler.
-Med **Samle kryss-seeds** på (standard, valget huskes i nettleseren) vises de som én rad:
+Med **Samle kryss-seeds** på (standard; slås av under Innstillinger, og valget huskes i nettleseren) vises
+de som én rad:
 
 - **Tracker** viser alle trackerne, og merket ved navnet sier hvor mange
 - **Lastet opp** er summen, og **Ratio** er summen delt på størrelsen, altså hvor mange ganger filene er

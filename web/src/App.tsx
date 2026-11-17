@@ -10,6 +10,7 @@ import { DeleteDialog } from './components/DeleteDialog';
 import { TransferPanel } from './components/TransferPanel';
 import { DetailsPanel } from './components/DetailsPanel';
 import { OrphansDialog } from './components/OrphansDialog';
+import { SettingsPage } from './components/SettingsPage';
 import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
 import { TorrentTable, type Sort, type SortKey } from './components/TorrentTable';
 import { findDuplicates, torrentKey } from './duplicates';
@@ -21,6 +22,7 @@ const DISMISSED_KEY = 'stim.dismissedTransfers';
 const HIDDEN_TRACKERS_KEY = 'stim.hiddenTrackers';
 const DISMISSED_DUPLICATES_KEY = 'stim.dismissedDuplicates';
 const GROUP_RELEASES_KEY = 'stim.groupReleases';
+const SETTINGS_HASH = '#innstillinger';
 
 // Small per-browser settings. Storage can be unavailable or hold junk, so
 // both directions fail quietly.
@@ -92,6 +94,25 @@ export default function App() {
   // The torrent shown in the detail panel, and the server being cleaned up.
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [cleanUpServer, setCleanUpServer] = useState<string | null>(null);
+  // The settings page lives at #innstillinger, so the browser's back button
+  // returns to the list.
+  const [settingsOpen, setSettingsOpen] = useState(() => window.location.hash === SETTINGS_HASH);
+  const [configRevision, setConfigRevision] = useState(0);
+  useEffect(() => {
+    const onHash = () => setSettingsOpen(window.location.hash === SETTINGS_HASH);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const openSettings = () => {
+    window.location.hash = SETTINGS_HASH;
+  };
+  const closeSettings = () => {
+    if (window.location.hash === SETTINGS_HASH) {
+      // Leave the page the way it was entered, without a hash in the address.
+      window.history.pushState(null, '', window.location.pathname + window.location.search);
+    }
+    setSettingsOpen(false);
+  };
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleGrouping = (on: boolean) => {
     setGrouping(on);
@@ -493,9 +514,23 @@ export default function App() {
 
   return (
     <div className="app">
+      {settingsOpen ? (
+        <SettingsPage
+          instances={instances}
+          kinds={kinds}
+          colorOf={colorOf}
+          grouping={grouping}
+          onGrouping={toggleGrouping}
+          onAdd={() => setDialog({ existing: null })}
+          onEdit={openEdit}
+          onCleanUp={setCleanUpServer}
+          onBack={closeSettings}
+          revision={configRevision}
+        />
+      ) : (
+      <>
       <Sidebar
         instances={instances}
-        kinds={kinds}
         colorOf={colorOf}
         total={torrents.length}
         instanceFilter={instanceFilter}
@@ -503,9 +538,7 @@ export default function App() {
         stateFilter={stateFilter}
         stateCounts={stateCounts}
         onStateFilter={setStateFilter}
-        onAdd={() => setDialog({ existing: null })}
-        onEdit={openEdit}
-        onCleanUp={setCleanUpServer}
+        onOpenSettings={openSettings}
         trackers={trackerCounts}
         hiddenTrackers={hiddenTrackers}
         onToggleTracker={toggleTracker}
@@ -617,10 +650,6 @@ export default function App() {
               Slett …
             </button>
           </div>
-          <label className="check toolbar-toggle" title="Én rad per utgivelse som seedes på flere trackere">
-            <input type="checkbox" checked={grouping} onChange={(e) => toggleGrouping(e.target.checked)} />
-            <span>Samle kryss-seeds</span>
-          </label>
           <p className="toolbar-count" aria-live="polite">
             {selectedTorrents.length > 0
               ? `${count(selectedTorrents.length)} valgt`
@@ -714,6 +743,8 @@ export default function App() {
           />
         )}
       </main>
+      </>
+      )}
 
       {dialog && (
         <InstanceDialog
@@ -723,6 +754,7 @@ export default function App() {
           onChanged={(text) => {
             setDialog(null);
             setNotice({ text });
+            setConfigRevision((n) => n + 1);
             refresh();
           }}
         />
