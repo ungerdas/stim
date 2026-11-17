@@ -392,6 +392,60 @@ input[type='radio'] {
   min-width: 0;
 }
 
+.expander {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.expander:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+
+.release-badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 17px;
+  white-space: nowrap;
+}
+
+.trow.is-child .col-name {
+  padding-left: 30px;
+}
+
+.trow.is-child .name {
+  color: var(--ink-soft);
+}
+
+.trow.is-child {
+  background: color-mix(in srgb, var(--raised) 45%, transparent);
+}
+
+.name-meta-tracker {
+  color: var(--ink);
+}
+
+.toolbar-toggle {
+  font-size: 13px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
 .dup-badge {
   flex: none;
   padding: 0 5px;

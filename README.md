@@ -23,6 +23,8 @@ Tidlig skjelett. Dette fungerer:
 - legge til, endre og fjerne klienter, med tilkoblingstest
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
 - trackerfilter: huk av hvilke trackere som skal vises (valget huskes i nettleseren)
+- kryss-seeds samlet: samme utgivelse på flere trackere vises som én rad med trackerne, summert opplastet og
+  samlet ratio, og kan foldes ut (slås av med «Samle kryss-seeds»)
 - hvor mye som er lastet opp: for utvalget i sidemenyen, og per tracker og klient under «Se statistikk»
 - pause og gjenoppta, også på tvers av klienter i samme operasjon
 - slette torrenter, med eller uten filene, med varsel når andre torrenter bruker de samme filene
@@ -162,6 +164,21 @@ Over SFTP leser Stim `.torrent`-filer, og ved flytting mellom servere filene til
 Stim skriver bare til mappen du velger når du flytter, og sletter bare det Stim selv kopierte. Men
 SSH-innloggingen gir full tilgang til kontoen på serveren, og den lagres i klartekst i
 `config/instances.json`. Bruk gjerne en egen nøkkel kun for Stim.
+
+## Kryss-seeds i listen
+
+Torrenter med samme navn og størrelse regnes som samme utgivelse, for eksempel seedet på flere trackere.
+Med **Samle kryss-seeds** på (standard, valget huskes i nettleseren) vises de som én rad:
+
+- **Tracker** viser alle trackerne, og merket ved navnet sier hvor mange
+- **Lastet opp** er summen, og **Ratio** er summen delt på størrelsen, altså hvor mange ganger filene er
+  lastet opp til sammen
+- **Status** viser det som trenger oppmerksomhet først (feil, nedlasting, pause), ellers «Seeder»
+- pilen foran navnet folder ut én rad per torrent
+
+Å velge raden velger alle torrentene i den, så Pause, Flytt og Slett gjelder alle. Fold ut for å velge
+enkelttorrenter. Filtre og søk gjelder hver torrent for seg: skjuler du en tracker, forsvinner bare den fra
+raden.
 
 ## Dobbeltseeding
 

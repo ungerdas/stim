@@ -11,12 +11,14 @@ import { TransferPanel } from './components/TransferPanel';
 import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
 import { TorrentTable, type Sort, type SortKey } from './components/TorrentTable';
 import { findDuplicates, torrentKey } from './duplicates';
+import { buildRows, rowKeys } from './releases';
 
 const POLL_MS = 3000;
 const TRANSFER_POLL_MS = 1200;
 const DISMISSED_KEY = 'stim.dismissedTransfers';
 const HIDDEN_TRACKERS_KEY = 'stim.hiddenTrackers';
 const DISMISSED_DUPLICATES_KEY = 'stim.dismissedDuplicates';
+const GROUP_RELEASES_KEY = 'stim.groupReleases';
 
 // Small per-browser settings. Storage can be unavailable or hold junk, so
 // both directions fail quietly.
@@ -34,6 +36,22 @@ function saveSet(key: string, set: Set<string>, keep = Infinity) {
     localStorage.setItem(key, JSON.stringify([...set].slice(-keep)));
   } catch {
     // Not saved; the choice still applies until the page is reloaded.
+  }
+}
+function loadFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+}
+
+function saveFlag(key: string, value: boolean) {
+  try {
+    localStorage.setItem(key, value ? '1' : '0');
+  } catch {
+    // Not saved; see saveSet.
   }
 }
 const INSTANCE_COLORS = 6; // --inst-0 … --inst-5 in styles.css
@@ -67,6 +85,23 @@ export default function App() {
   // only for new ones.
   const [dismissedDups, setDismissedDups] = useState<Set<string>>(() => loadSet(DISMISSED_DUPLICATES_KEY));
   const lastClicked = useRef<string | null>(null);
+  // One row per release seeded on several trackers, unless turned off.
+  const [grouping, setGrouping] = useState(() => loadFlag(GROUP_RELEASES_KEY, true));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleGrouping = (on: boolean) => {
+    setGrouping(on);
+    saveFlag(GROUP_RELEASES_KEY, on);
+  };
+  const toggleExpanded = useCallback(
+    (key: string) =>
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      }),
+    [],
+  );
 
   // --- data -----------------------------------------------------------
 
@@ -281,6 +316,32 @@ export default function App() {
     return counts;
   }, [inTracker, dups]);
 
+  const compare = useMemo(() => {
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    const collator = new Intl.Collator('nb', { numeric: true, sensitivity: 'base' });
+    const value = (t: Torrent): string | number => {
+      switch (sort.key) {
+        case 'instance':
+          // A release in several clients has no single client; it sorts last.
+          return t.instanceId ? (instanceById.get(t.instanceId)?.status.name ?? '') : '\uffff';
+        case 'eta':
+          // Unknown and finished sort last when ascending.
+          return t.eta < 0 ? Number.MAX_SAFE_INTEGER : t.eta;
+        default:
+          return t[sort.key];
+      }
+    };
+    return (a: Torrent, b: Torrent) => {
+      const va = value(a);
+      const vb = value(b);
+      const cmp =
+        typeof va === 'string' || typeof vb === 'string'
+          ? collator.compare(String(va), String(vb))
+          : va - vb;
+      return cmp !== 0 ? cmp * dir : collator.compare(a.name, b.name) || a.hash.localeCompare(b.hash);
+    };
+  }, [sort, instanceById]);
+
   const visible = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     const list = inTracker.filter((t) => {
@@ -295,30 +356,16 @@ export default function App() {
       const haystack = `${t.name} ${t.label} ${t.tags.join(' ')} ${t.tracker}`.toLowerCase();
       return terms.every((term) => haystack.includes(term));
     });
+    return [...list].sort(compare);
+  }, [inTracker, stateFilter, query, compare, dups]);
 
-    const dir = sort.dir === 'asc' ? 1 : -1;
-    const collator = new Intl.Collator('nb', { numeric: true, sensitivity: 'base' });
-    const value = (t: Torrent): string | number => {
-      switch (sort.key) {
-        case 'instance':
-          return instanceById.get(t.instanceId)?.status.name ?? '';
-        case 'eta':
-          // Unknown and finished sort last when ascending.
-          return t.eta < 0 ? Number.MAX_SAFE_INTEGER : t.eta;
-        default:
-          return t[sort.key];
-      }
-    };
-    return [...list].sort((a, b) => {
-      const va = value(a);
-      const vb = value(b);
-      const cmp =
-        typeof va === 'string' || typeof vb === 'string'
-          ? collator.compare(String(va), String(vb))
-          : va - vb;
-      return cmp !== 0 ? cmp * dir : collator.compare(a.name, b.name) || a.hash.localeCompare(b.hash);
-    });
-  }, [inTracker, stateFilter, query, sort, instanceById, dups]);
+  const rows = useMemo(() => buildRows(visible, grouping, expanded, compare), [visible, grouping, expanded, compare]);
+  // Torrents in the order the table shows them, for shift-click ranges. An
+  // open release lists its members once, under the release.
+  const displayKeys = useMemo(
+    () => rows.flatMap((r) => (r.type === 'torrent' && r.child ? [] : rowKeys(r))),
+    [rows],
+  );
 
   const summary = useMemo(() => {
     let uploaded = 0;
@@ -339,26 +386,28 @@ export default function App() {
 
   // --- selection --------------------------------------------------------
 
+  // A row stands for one torrent, or for every torrent of a release.
   const onToggle = useCallback(
-    (key: string, range: boolean) => {
+    (rowKeyList: string[], range: boolean) => {
+      const key = rowKeyList[0];
       setSelected((prev) => {
         const next = new Set(prev);
-        const keys = visible.map(torrentKey);
-        const from = lastClicked.current ? keys.indexOf(lastClicked.current) : -1;
-        const to = keys.indexOf(key);
+        const from = lastClicked.current ? displayKeys.indexOf(lastClicked.current) : -1;
+        const to = displayKeys.indexOf(key);
         if (range && from >= 0 && to >= 0) {
           const [lo, hi] = from < to ? [from, to] : [to, from];
-          for (let i = lo; i <= hi; i++) next.add(keys[i]);
-        } else if (next.has(key)) {
-          next.delete(key);
+          for (let i = lo; i <= hi; i++) next.add(displayKeys[i]);
+          for (const k of rowKeyList) next.add(k);
+        } else if (rowKeyList.every((k) => next.has(k))) {
+          for (const k of rowKeyList) next.delete(k);
         } else {
-          next.add(key);
+          for (const k of rowKeyList) next.add(k);
         }
         return next;
       });
       lastClicked.current = key;
     },
-    [visible],
+    [displayKeys],
   );
 
   const onToggleAll = () =>
@@ -549,6 +598,10 @@ export default function App() {
               Slett …
             </button>
           </div>
+          <label className="check toolbar-toggle" title="Én rad per utgivelse som seedes på flere trackere">
+            <input type="checkbox" checked={grouping} onChange={(e) => toggleGrouping(e.target.checked)} />
+            <span>Samle kryss-seeds</span>
+          </label>
           <p className="toolbar-count" aria-live="polite">
             {selectedTorrents.length > 0
               ? `${count(selectedTorrents.length)} valgt`
@@ -628,6 +681,8 @@ export default function App() {
         ) : (
           <TorrentTable
             torrents={visible}
+            rows={rows}
+            onExpand={toggleExpanded}
             instanceOf={instanceOf}
             colorOf={colorOf}
             selected={selected}

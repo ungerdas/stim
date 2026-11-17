@@ -4,6 +4,7 @@ import type { InstanceStatus, Torrent } from '../types';
 import { bytes, date, eta, percent, rate, ratio } from '../format';
 import { stateLabel } from '../text';
 import { torrentKey } from '../duplicates';
+import { rowId, rowKeys, type Release, type TableRow } from '../releases';
 
 export type SortKey =
   | 'name'
@@ -56,11 +57,15 @@ const COMPACT_BELOW = 764; // keep in step with the narrowest @container tier in
 export { torrentKey };
 
 interface Props {
+  /** The torrents in the list, for "select all". */
   torrents: Torrent[];
+  /** What to draw: torrents, releases and the members of open releases. */
+  rows: TableRow[];
+  onExpand: (releaseKey: string) => void;
   instanceOf: (instanceId: string) => InstanceStatus | undefined;
   colorOf: (instanceId: string) => string;
   selected: Set<string>;
-  onToggle: (key: string, range: boolean) => void;
+  onToggle: (keys: string[], range: boolean) => void;
   onToggleAll: () => void;
   sort: Sort;
   onSort: (key: SortKey) => void;
@@ -69,7 +74,7 @@ interface Props {
 }
 
 export function TorrentTable(props: Props) {
-  const { torrents, selected, sort } = props;
+  const { torrents, rows, selected, sort } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
 
@@ -83,7 +88,7 @@ export function TorrentTable(props: Props) {
 
   const rowHeight = compact ? ROW_HEIGHT_COMPACT : ROW_HEIGHT;
   const virtualizer = useVirtualizer({
-    count: torrents.length,
+    count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 14,
@@ -96,7 +101,7 @@ export function TorrentTable(props: Props) {
   const allSelected = torrents.length > 0 && selectedHere === torrents.length;
 
   return (
-    <div className="table" ref={scrollRef} role="grid" aria-rowcount={torrents.length + 1}>
+    <div className="table" ref={scrollRef} role="grid" aria-rowcount={rows.length + 1}>
       <div className="thead trow" role="row">
         <div className="cell col-check" role="columnheader">
           <input
@@ -132,21 +137,33 @@ export function TorrentTable(props: Props) {
 
       <div className="tbody" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((v) => {
-          const t = torrents[v.index];
-          const key = torrentKey(t);
+          const row = rows[v.index];
+          const keys = rowKeys(row);
+          const picked = keys.reduce((n, k) => n + (selected.has(k) ? 1 : 0), 0);
+          const t = row.type === 'torrent' ? row.torrent : row.release.summary;
+          const release = row.type === 'release' ? row.release : undefined;
+          const ids = release ? release.instanceIds : [t.instanceId];
+          const dup = row.type === 'torrent' ? props.duplicateOf(t) : undefined;
           return (
             <Row
-              key={key}
-              dupClients={props.duplicateOf(t)?.clients ?? 0}
-              dupOthers={props.duplicateOf(t)?.others ?? ''}
+              key={rowId(row)}
+              dupClients={dup?.clients ?? 0}
+              dupOthers={dup?.others ?? ''}
               torrent={t}
-              rowKey={key}
+              keys={keys}
+              release={release}
+              open={row.type === 'release' && row.open}
+              child={row.type === 'torrent' && row.child}
+              onExpand={props.onExpand}
               index={v.index}
               top={v.start - HEADER_HEIGHT}
               height={rowHeight}
-              instanceName={props.instanceOf(t.instanceId)?.name ?? ''}
-              color={props.colorOf(t.instanceId)}
-              selected={selected.has(key)}
+              instanceName={
+                ids.length === 1 ? (props.instanceOf(ids[0])?.name ?? '') : `${ids.length} klienter`
+              }
+              color={props.colorOf(ids[0])}
+              selected={picked > 0 && picked === keys.length}
+              partial={picked > 0 && picked < keys.length}
               onToggle={props.onToggle}
             />
           );
@@ -158,21 +175,43 @@ export function TorrentTable(props: Props) {
 
 interface RowProps {
   torrent: Torrent;
-  rowKey: string;
+  keys: string[];
+  release?: Release;
+  open: boolean;
+  child: boolean;
+  onExpand: (releaseKey: string) => void;
+  partial: boolean;
   index: number;
   top: number;
   height: number;
   instanceName: string;
   color: string;
   selected: boolean;
-  onToggle: (key: string, range: boolean) => void;
+  onToggle: (keys: string[], range: boolean) => void;
   dupClients: number;
   dupOthers: string;
 }
 
+/** "norbits.net" → "norbits" */
+const siteName = (domain: string) => domain.split('.')[0] || domain;
+
+/** "4 trackere", or "3 torrenter" when some share a tracker (copies in several clients). */
+function releaseBadge(r: Release): { text: string; title: string } {
+  const list = r.trackers.join(', ');
+  if (r.trackers.length === r.members.length) {
+    return { text: `${r.trackers.length} trackere`, title: `Seedes på ${list}` };
+  }
+  return { text: `${r.members.length} torrenter`, title: `${r.members.length} torrenter på ${list || 'ukjent tracker'}` };
+}
+
 const Row = memo(function Row({
   torrent: t,
-  rowKey,
+  keys,
+  release,
+  open,
+  child,
+  onExpand,
+  partial,
   index,
   top,
   height,
@@ -188,34 +227,56 @@ const Row = memo(function Row({
   const stateText = stateLabel[t.state];
   const stateTitle = t.message ? `${t.rawState}: ${t.message}` : `Klientens status: ${t.rawState}`;
   const labelText = [t.label, ...t.tags].filter(Boolean).join(', ');
+  const badge = release && releaseBadge(release);
+  const what = release ? `${t.name}, alle ${release.members.length}` : child ? `${t.name} på ${t.tracker || 'ukjent tracker'}` : t.name;
 
   return (
     <div
-      className={`trow${selected ? ' is-selected' : ''}`}
+      className={`trow${selected ? ' is-selected' : ''}${release ? ' is-release' : ''}${child ? ' is-child' : ''}`}
       role="row"
       aria-rowindex={index + 2}
       aria-selected={selected}
+      aria-expanded={release ? open : undefined}
       style={{ transform: `translateY(${top}px)`, height }}
       onClick={(e) => {
-        // Let text selection and the checkbox itself work normally.
-        if ((e.target as HTMLElement).closest('input')) return;
+        // Let text selection, the checkbox and the expander work normally.
+        if ((e.target as HTMLElement).closest('input, button')) return;
         if (window.getSelection()?.toString()) return;
-        onToggle(rowKey, e.shiftKey);
+        onToggle(keys, e.shiftKey);
       }}
     >
       <div className="cell col-check" role="gridcell">
         <input
           type="checkbox"
-          aria-label={`Velg ${t.name}`}
+          aria-label={`Velg ${what}`}
           checked={selected}
-          onChange={(e) => onToggle(rowKey, (e.nativeEvent as MouseEvent).shiftKey)}
+          ref={(el) => {
+            if (el) el.indeterminate = partial;
+          }}
+          onChange={(e) => onToggle(keys, (e.nativeEvent as MouseEvent).shiftKey)}
         />
       </div>
       <div className="cell col-name" role="gridcell">
         <span className="name-line">
+          {release && (
+            <button
+              type="button"
+              className="expander"
+              aria-expanded={open}
+              aria-label={open ? `Skjul de ${release.members.length} torrentene` : `Vis de ${release.members.length} torrentene`}
+              onClick={() => onExpand(release.key)}
+            >
+              <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+            </button>
+          )}
           <span className="name" title={t.name}>
             {t.name}
           </span>
+          {badge && (
+            <span className="release-badge" title={badge.title}>
+              {badge.text}
+            </span>
+          )}
           {dupClients > 1 && (
             <span className="dup-badge" title={`Seedes også fra ${dupOthers}`}>
               {dupClients}×
@@ -224,6 +285,7 @@ const Row = memo(function Row({
         </span>
         {/* Shown instead of the other columns when the table is narrow. */}
         <span className="name-meta">
+          {child && <span className="name-meta-tracker">{t.tracker || 'ukjent tracker'}</span>}
           <span className="inst-dot" style={{ background: color }} aria-hidden="true" />
           <span className="name-meta-inst">{instanceName}</span>
           <span className={`state-text state-${t.state}`}>{stateText}</span>
@@ -258,7 +320,11 @@ const Row = memo(function Row({
       <div className="cell col-uploaded is-numeric" role="gridcell">
         {bytes(t.uploaded)}
       </div>
-      <div className="cell col-ratio is-numeric" role="gridcell">
+      <div
+        className="cell col-ratio is-numeric"
+        role="gridcell"
+        title={release ? 'Lastet opp på alle trackerne til sammen, delt på størrelsen' : undefined}
+      >
         {ratio(t.ratio)}
       </div>
       <div className="cell col-eta is-numeric" role="gridcell">
@@ -268,7 +334,8 @@ const Row = memo(function Row({
         <span className="ellipsis">{labelText}</span>
       </div>
       <div className="cell col-tracker" role="gridcell" title={t.tracker}>
-        <span className="ellipsis">{t.tracker}</span>
+        {/* For a release, the site names alone, so more of them fit. */}
+        <span className="ellipsis">{release ? release.trackers.map(siteName).join(', ') : t.tracker}</span>
       </div>
       <div className="cell col-added is-numeric" role="gridcell">
         {date(t.addedAt)}
