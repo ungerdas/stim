@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { InstanceStatus, SearchHit, SearchIndexer, Torrent } from '../types';
 import { age, bytes, count } from '../format';
@@ -15,9 +15,17 @@ interface Props {
 }
 
 type SortKey = 'title' | 'indexer' | 'size' | 'seeders' | 'leechers' | 'grabs' | 'age';
+type Sort = { key: SortKey; dir: 1 | -1 };
+
+const SORT_KEYS: SortKey[] = ['title', 'indexer', 'size', 'seeders', 'leechers', 'grabs', 'age'];
+/** Newest first: ascending age. */
+const DEFAULT_SORT: Sort = { key: 'age', dir: 1 };
+/** Which way a column sorts on its first click: names A–Z, newest first, otherwise the most first. */
+const FIRST_DIR: Record<SortKey, 1 | -1> = { title: 1, indexer: 1, age: 1, size: -1, seeders: -1, leechers: -1, grabs: -1 };
 
 const HIDDEN_INDEXERS_KEY = 'stim.searchHiddenIndexers';
 const LAST_GRAB_KEY = 'stim.lastGrab';
+const SORT_STORE_KEY = 'stim.searchSort';
 
 const CATEGORIES: { label: string; ids: number[] }[] = [
   { label: 'Alt', ids: [] },
@@ -42,6 +50,21 @@ function saveJSON(key: string, value: unknown) {
   }
 }
 
+function loadSort(): Sort {
+  const s = loadJSON<Partial<Sort>>(SORT_STORE_KEY, {});
+  return s.key && SORT_KEYS.includes(s.key) && (s.dir === 1 || s.dir === -1) ? { key: s.key, dir: s.dir } : DEFAULT_SORT;
+}
+
+/** Lets a release name wrap after its dots, underscores and dashes, so one long name can't push the other columns off the page. */
+function breakable(title: string) {
+  return title.split(/(?<=[._\-/])/).map((part, i) => (
+    <Fragment key={i}>
+      {i > 0 && <wbr />}
+      {part}
+    </Fragment>
+  ));
+}
+
 /** What the clients already have of a hit: the very torrent, or the same release from another tracker. */
 interface Have {
   exact: Torrent[];
@@ -60,7 +83,7 @@ export function SearchPage({ instances, torrents, colorOf, onBack, onOpenSetting
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [took, setTook] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'seeders', dir: -1 });
+  const [sort, setSort] = useState<Sort>(loadSort);
   const [grabbing, setGrabbing] = useState<SearchHit | null>(null);
   const [sent, setSent] = useState<Set<string>>(new Set());
 
@@ -123,21 +146,28 @@ export function SearchPage({ instances, torrents, colorOf, onBack, onOpenSetting
 
   const sorted = useMemo(() => {
     if (!hits) return [];
-    const value = (h: SearchHit): number | string => {
+    // null: the tracker didn't say; such hits go last whichever way the column sorts.
+    const value = (h: SearchHit): number | string | null => {
       switch (sort.key) {
         case 'title':
           return h.title.toLowerCase();
         case 'indexer':
           return h.indexer.toLowerCase();
-        case 'age':
-          return -(Date.parse(h.publishDate ?? '') || 0);
+        case 'age': {
+          const t = Date.parse(h.publishDate ?? '');
+          return Number.isNaN(t) ? null : -t;
+        }
         default:
-          return h[sort.key] ?? -1;
+          return h[sort.key] ?? null;
       }
     };
     return [...hits].sort((a, b) => {
       const va = value(a);
       const vb = value(b);
+      if (va === null || vb === null) {
+        if (va !== vb) return va === null ? 1 : -1;
+        return a.title.localeCompare(b.title);
+      }
       const c = typeof va === 'string' ? va.localeCompare(String(vb), 'nb') : va - (vb as number);
       return c * sort.dir || a.title.localeCompare(b.title);
     });
@@ -145,15 +175,19 @@ export function SearchPage({ instances, torrents, colorOf, onBack, onOpenSetting
 
   const header = (key: SortKey, label: string, numeric = false) => {
     const active = sort.key === key;
+    const hint = key === 'age' ? (active && sort.dir === 1 ? 'Nyeste først – trykk for eldste først' : 'Sorter nyeste først') : undefined;
     return (
       <th scope="col" className={numeric ? 'is-numeric' : undefined} aria-sort={active ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
         <button
           type="button"
           className="th-button"
+          title={hint}
           onClick={() =>
-            setSort((s) =>
-              s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === 'title' || key === 'indexer' ? 1 : -1 },
-            )
+            setSort((s) => {
+              const next: Sort = s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: FIRST_DIR[key] };
+              saveJSON(SORT_STORE_KEY, next);
+              return next;
+            })
           }
         >
           {label}
@@ -265,10 +299,10 @@ export function SearchPage({ instances, torrents, colorOf, onBack, onOpenSetting
                           <span className="search-title-text">
                             {h.infoUrl ? (
                               <a href={h.infoUrl} target="_blank" rel="noreferrer">
-                                {h.title}
+                                {breakable(h.title)}
                               </a>
                             ) : (
-                              h.title
+                              breakable(h.title)
                             )}
                           </span>
                           <span className="search-badges">

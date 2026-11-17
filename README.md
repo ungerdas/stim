@@ -182,7 +182,8 @@ Stim logger ikke inn på trackerne selv.
 1. Under **Innstillinger → Søk på trackerne**: adressen til Prowlarr (for eksempel
    `http://192.168.50.5:9696`) og API-nøkkelen fra Prowlarrs *Settings → General*. «Test tilkobling» viser
    hvilke trackere Prowlarr har.
-2. Søk, velg trackere og eventuelt TV eller film. Treffene kan sorteres på seedere, størrelse, alder osv.
+2. Søk, velg trackere og eventuelt TV eller film. Treffene vises med de nyeste først. Trykk på et
+   kolonnenavn for å sortere på seedere, størrelse, alder osv.; Stim husker sorteringen du valgte sist.
 3. **Last ned** henter `.torrent`-filen gjennom Prowlarr og legger den i klienten du velger, i mappen og
    kategorien/etiketten du oppgir (tomt: klienten bestemmer selv).
 

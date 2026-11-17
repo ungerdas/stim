@@ -326,8 +326,13 @@ input[type='radio'] {
 }
 
 .search-results td.search-title {
+  width: 100%;
   min-width: 320px;
   white-space: normal;
+}
+
+.search-title-text {
+  overflow-wrap: anywhere;
 }
 
 .search-title-text a {
