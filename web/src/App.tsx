@@ -14,6 +14,7 @@ import { SettingsPage } from './components/SettingsPage';
 import { SearchPage } from './components/SearchPage';
 import { Sidebar, type StateFilter, type TrackerCount } from './components/Sidebar';
 import { TorrentTable, type Sort, type SortKey } from './components/TorrentTable';
+import { loadColumnPrefs, saveColumnPrefs, type ColumnPrefs } from './columns';
 import { findDuplicates, torrentKey } from './duplicates';
 import { buildRows, rowKeys } from './releases';
 
@@ -96,6 +97,7 @@ export default function App() {
   const lastClicked = useRef<string | null>(null);
   // One row per release seeded on several trackers, unless turned off.
   const [grouping, setGrouping] = useState(() => loadFlag(GROUP_RELEASES_KEY, true));
+  const [columns, setColumns] = useState<ColumnPrefs>(loadColumnPrefs);
   // The torrent shown in the detail panel, and the server being cleaned up.
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [cleanUpServer, setCleanUpServer] = useState<string | null>(null);
@@ -118,6 +120,8 @@ export default function App() {
     setView('list');
   };
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  useEffect(() => saveColumnPrefs(columns), [columns]);
+
   const toggleGrouping = (on: boolean) => {
     setGrouping(on);
     saveFlag(GROUP_RELEASES_KEY, on);
@@ -537,6 +541,8 @@ export default function App() {
           colorOf={colorOf}
           grouping={grouping}
           onGrouping={toggleGrouping}
+          columns={columns}
+          onColumns={setColumns}
           onAdd={() => setDialog({ existing: null })}
           onEdit={openEdit}
           onCleanUp={setCleanUpServer}
@@ -757,6 +763,8 @@ export default function App() {
             sort={sort}
             onSort={onSort}
             duplicateOf={duplicateOf}
+            columns={columns}
+            onColumns={setColumns}
           />
         )}
       </main>

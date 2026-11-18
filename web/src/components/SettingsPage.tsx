@@ -3,6 +3,8 @@ import { api } from '../api';
 import type { InstanceConfig, InstanceStatus, KindInfo } from '../types';
 import { bytes, count } from '../format';
 import { instanceProblemShort } from '../text';
+import { DEFAULT_PREFS, type ColumnPrefs } from '../columns';
+import { ColumnChoices, isDefaultLayout } from './ColumnMenu';
 
 interface Props {
   instances: InstanceStatus[];
@@ -10,6 +12,8 @@ interface Props {
   colorOf: (instanceId: string) => string;
   grouping: boolean;
   onGrouping: (on: boolean) => void;
+  columns: ColumnPrefs;
+  onColumns: (prefs: ColumnPrefs) => void;
   onAdd: () => void;
   onEdit: (id: string) => void;
   onCleanUp: (server: string) => void;
@@ -168,6 +172,23 @@ export function SettingsPage(props: Props) {
             </span>
           </span>
         </label>
+        <div className="settings-columns">
+          <span className="settings-toggle-name">Kolonner i listen</span>
+          <p className="hint">
+            Dra i kanten av en kolonneoverskrift for å endre bredden. Dobbeltklikk på kanten av Navn for å få plass til
+            det lengste navnet. Høyreklikk på overskriftene for å velge kolonner rett i listen. Er listen for smal, viker
+            Lagt til, Gjenstår og Etikett først, og Tracker sist.
+          </p>
+          <ColumnChoices prefs={props.columns} onChange={props.onColumns} />
+          <button
+            type="button"
+            className="btn btn-small"
+            disabled={isDefaultLayout(props.columns)}
+            onClick={() => props.onColumns(DEFAULT_PREFS)}
+          >
+            Tilbakestill kolonnene
+          </button>
+        </div>
         <p className="hint">Valgene huskes i denne nettleseren.</p>
       </section>
 

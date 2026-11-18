@@ -43,11 +43,12 @@
   --radius: 6px;
   --row-pad: 12px;
 
-  /* Column tracks and their summed minimum width. Rows are absolutely
-     positioned for virtual scrolling, so every row must resolve the same
-     tracks: the minimum is fixed here instead of derived from content. */
-  --cols: 40px minmax(300px, 1fr) 150px 112px 120px 84px 92px 92px 100px 56px 84px 124px 130px 118px;
-  --table-min: 1602px;
+  /* Column tracks and their summed minimum width, set on the table by
+     columns.ts. Rows are absolutely positioned for virtual scrolling, so
+     every row must resolve the same tracks: they come from the column
+     widths, never from content. These are only the first paint. */
+  --cols: 40px minmax(220px, 1fr);
+  --table-min: 0px;
 }
 
 *,
@@ -1433,6 +1434,141 @@ input[type='radio'] {
   color: var(--ink);
 }
 
+/* Drag the right edge of a heading to resize its column. */
+.thead .cell {
+  position: relative;
+}
+
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  right: 3px;
+  width: 1px;
+  background: var(--line);
+  transition: background-color 120ms;
+}
+
+.thead:hover .col-resizer::after {
+  background: color-mix(in srgb, var(--ink-soft) 55%, transparent);
+}
+
+.col-resizer:hover::after,
+.col-resizer:focus-visible::after,
+.col-resizer.is-dragging::after {
+  top: 4px;
+  bottom: 4px;
+  right: 3px;
+  width: 2px;
+  background: var(--mark);
+}
+
+.col-resizer:focus-visible {
+  outline: none;
+}
+
+body.is-resizing,
+body.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+.column-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 220px;
+  padding: 10px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--raised);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.55);
+  font-size: 14px;
+}
+
+.column-menu-title {
+  margin: 0 14px 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.column-menu .column-choices {
+  display: flex;
+  flex-direction: column;
+}
+
+.column-menu .column-choice {
+  padding: 5px 14px;
+}
+
+.column-menu .column-choice:hover {
+  background: var(--tint);
+}
+
+.column-menu-actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 14px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.column-choices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.column-choice {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.column-choice input {
+  align-self: center;
+  margin: 0;
+}
+
+.column-choice-note {
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 12px;
+  color: var(--queued);
+}
+
+.settings-columns {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.settings-columns .hint {
+  margin: 0;
+}
+
+.settings-columns .column-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 20px;
+  width: 100%;
+  margin: 4px 0 6px;
+}
+
 .th-arrow {
   font-size: 8px;
   color: var(--mark);
@@ -1811,47 +1947,13 @@ input[type='radio'] {
   color: var(--bad);
 }
 
-/* Narrower tables drop the least urgent columns instead of scrolling sideways. */
+/* Which columns fit is worked out in columns.ts; below 764px the list
+   becomes one column with the details under the name. */
 .main {
   container-type: inline-size;
 }
 
-@container (max-width: 1602px) {
-  .table {
-    --cols: 40px minmax(220px, 1fr) 140px 112px 112px 84px 92px 92px 100px 56px 130px;
-    --table-min: 1178px;
-  }
-  .col-label,
-  .col-eta,
-  .col-added {
-    display: none;
-  }
-}
-
-@container (max-width: 1178px) {
-  .table {
-    --cols: 40px minmax(200px, 1fr) 116px 112px 112px 92px 92px;
-    --table-min: 764px;
-  }
-  .col-size,
-  .col-ratio,
-  .col-eta,
-  .col-tracker,
-  .col-uploaded {
-    display: none;
-  }
-}
-
 @container (max-width: 764px) {
-  .table {
-    --cols: 40px minmax(0, 1fr);
-    --table-min: 0px;
-  }
-  .col-instance,
-  .col-state,
-  .col-progress,
-  .col-down,
-  .col-up,
   .thead .cell:not(.col-check):not(.col-name) {
     display: none;
   }
