@@ -116,12 +116,12 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
     forgetHostKey: pinKey?.replace,
   });
 
-  const runTest = async () => {
+  const runTest = async (overrides?: Partial<InstanceInput>) => {
     setBusy('test');
     setTest(null);
     setError(null);
     try {
-      const result = await api.testInstance(input());
+      const result = await api.testInstance({ ...input(), ...overrides });
       setTest(result);
       const ssh = result.ssh;
       if (ssh?.newHostKey && ssh.hostKey && ssh.fingerprint && !pinKey?.replace) {
@@ -168,13 +168,44 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
   const advancedOpen = Boolean(existing?.basicUser || existing?.tlsSkipVerify);
   const storedFingerprint = existing?.sshHost === form.sshHost.trim() ? existing?.sshHostFingerprint : '';
 
+  /** "24 av 26 torrenter i klienten har filen sin der", when the client could be asked. */
+  const share = (matched: number | undefined, of: number | undefined) =>
+    of ? `${matched ?? 0} av ${of} torrenter i klienten har torrentfilen sin der` : '';
+
+  const suggestion = (ssh: SSHTestResult, lead: string) => {
+    const dir = ssh.suggestion;
+    if (!dir) return null;
+    const how = share(ssh.suggestionMatched, ssh.clientTorrents);
+    return (
+      <>
+        <p>
+          {lead} {dir}
+          {how && ` (${how})`}.
+        </p>
+        <button
+          type="button"
+          className="btn btn-small"
+          onClick={() => {
+            set('torrentDir', dir);
+            void runTest({ torrentDir: dir });
+          }}
+        >
+          Bruk {dir}
+        </button>
+      </>
+    );
+  };
+
   const sshStatus = (ssh: SSHTestResult) => {
+    const dir = form.torrentDir.trim();
     if (ssh.ok) {
+      const how = share(ssh.matched, ssh.clientTorrents);
+      const missing = (ssh.clientTorrents ?? 0) - (ssh.matched ?? 0);
       return (
         <p className="status-ok">
-          {needsDir
-            ? `SSH: fant ${ssh.torrents} torrentfiler i ${form.torrentDir.trim()}.`
-            : 'SSH-tilkoblingen virker.'}
+          {needsDir ? `SSH: fant ${ssh.torrents ?? 0} torrentfiler i ${dir}.` : 'SSH-tilkoblingen virker.'}
+          {needsDir && how && ` ${how[0].toUpperCase()}${how.slice(1)}.`}
+          {needsDir && how && missing > 0 && ' De som mangler, kan ikke flyttes til en annen klient.'}
           {pinKey && !pinKey.replace && (
             <>
               {' '}
@@ -208,7 +239,42 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
         </div>
       );
     }
-    return <p className="status-bad">SSH: {ssh.error}</p>;
+    switch (ssh.errorCode) {
+      case 'ssh-incomplete':
+        return <p className="status-bad">SSH trenger et brukernavn, og et passord eller en nøkkel.</p>;
+      case 'torrent-dir-missing':
+        return (
+          <div className="status-bad">
+            {ssh.suggestion ? (
+              suggestion(ssh, 'Mappen med torrentfilene er ikke fylt ut. Stim fant')
+            ) : (
+              <p>
+                Mappen med torrentfilene er ikke fylt ut, og Stim fant den ikke på det vanlige stedet (
+                {kind?.torrentDirHint}).
+              </p>
+            )}
+          </div>
+        );
+      case 'torrent-dir-wrong':
+        return (
+          <div className="status-bad">
+            <p>
+              SSH virker, men ingen av de {ssh.clientTorrents} torrentene i klienten har torrentfilen sin i {dir}. Er det
+              mappen til en annen {kind?.label}?
+            </p>
+            {suggestion(ssh, 'Den riktige er trolig')}
+          </div>
+        );
+      case 'torrent-dir-unreadable':
+        return (
+          <div className="status-bad">
+            <p>SSH virker, men fant ikke mappen {dir} på serveren.</p>
+            {suggestion(ssh, 'Stim fant')}
+          </div>
+        );
+      default:
+        return <p className="status-bad">SSH: {ssh.error}</p>;
+    }
   };
 
   return (
@@ -424,7 +490,8 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
                   />
                   <span className="hint">
                     Relativt til hjemmemappen, eller full sti. For {kind?.label} er det vanligvis {kind?.torrentDirHint}.
-                    Har du flere instanser på samme server, har hver sin mappe.
+                    Har du flere instanser på samme server, har hver sin mappe. Er du usikker, la feltet stå tomt
+                    og trykk Test tilkobling, så leter Stim etter den.
                   </span>
                 </label>
               )}
@@ -458,7 +525,7 @@ export function InstanceDialog({ kinds, existing, onClose, onChanged }: Props) {
                 </button>
               ))}
             <span className="dialog-spacer" />
-            <button type="button" className="btn" onClick={runTest} disabled={busy !== null || !form.url}>
+            <button type="button" className="btn" onClick={() => void runTest()} disabled={busy !== null || !form.url}>
               {busy === 'test' ? 'Tester …' : 'Test tilkobling'}
             </button>
             <button type="submit" className="btn btn-primary" disabled={busy !== null}>

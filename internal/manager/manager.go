@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -377,13 +378,33 @@ func (m *Manager) perInstance(ctx context.Context, items []Item, fn func(context
 
 // Test tries to reach a client with the given settings without saving them.
 func Test(ctx context.Context, in store.Instance) (string, error) {
+	version, _, err := TestWithHashes(ctx, in, false)
+	return version, err
+}
+
+// TestWithHashes is Test that, when withHashes is set, also lists the info
+// hashes of the client's torrents (lowercase). Listing is best effort: a
+// client that answers but can't list gives no hashes and no error.
+func TestWithHashes(ctx context.Context, in store.Instance, withHashes bool) (string, []string, error) {
 	cli, err := client.New(in.Kind, in.ClientConfig())
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
-	return cli.Version(ctx)
+	version, err := cli.Version(ctx)
+	if err != nil || !withHashes {
+		return version, nil, err
+	}
+	list, err := cli.Torrents(ctx)
+	if err != nil {
+		return version, nil, nil
+	}
+	hashes := make([]string, 0, len(list))
+	for _, t := range list {
+		hashes = append(hashes, strings.ToLower(t.Hash))
+	}
+	return version, hashes, nil
 }
 
 // brokenClient stands in for an instance whose configuration could not be

@@ -22,6 +22,9 @@ Tidlig skjelett. Dette fungerer:
 
 - legge til, endre og fjerne klienter, med tilkoblingstest
 - samlet torrentliste på tvers av klienter, med søk, sortering og filter på klient og status
+- justerbare kolonner: dra i kanten av en overskrift for å endre bredden, dobbeltklikk på kanten av Navn for
+  å få plass til det lengste navnet, og høyreklikk på overskriftene (eller gå til Innstillinger → Visning) for
+  å velge kolonner. Er listen for smal, viker de minst viktige kolonnene først. Valgene huskes i nettleseren.
 - trackerfilter: huk av hvilke trackere som skal vises (valget huskes i nettleseren)
 - trackerfeil og avregistrerte torrenter: egne filtre, markering i listen og trackerens egen melding
 - søk på alle trackerne dine gjennom Prowlarr, og last ned rett til valgfri klient, med merking av det du
@@ -163,9 +166,11 @@ qBittorrent gir fra seg `.torrent`-filen over API-et (4.5 og nyere). Deluge gjø
 
 - **SSH-vert, port, brukernavn** og enten **passord** eller **privat nøkkel** (uten passordfrase)
 - **Mappen med torrentfilene**, vanligvis `.config/deluge/state` relativt til hjemmemappen. Har du flere
-  Deluge-instanser på samme server, har hver sin mappe.
+  Deluge-instanser på samme server, har hver sin mappe (for eksempel `.config/deluge2/state`).
 
-«Test tilkobling» viser hvor mange torrentfiler Stim fant, og serverens SSH-nøkkel. Nøkkelen lagres, og
+«Test tilkobling» viser hvor mange torrentfiler Stim fant, hvor mange av klientens torrenter som har filen
+sin i mappen, og serverens SSH-nøkkel. Står mappen tom, finnes ikke eller tilhører en annen Deluge, leter
+Stim i `.config/deluge*/state` og foreslår mappen der klientens torrenter ligger. Nøkkelen lagres, og
 endres den senere, nekter Stim å koble til til du har godtatt den nye under Endre.
 
 Over SFTP leser Stim `.torrent`-filer, og ved flytting mellom servere filene til torrentene som flyttes.

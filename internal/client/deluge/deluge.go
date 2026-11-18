@@ -35,7 +35,9 @@ func init() {
 		ExportsTorrentFiles: false,
 		SSH:                 "required",
 		TorrentDirHint:      ".config/deluge/state",
-		CanMoveFiles:        true,
+		// One per daemon: .config/deluge, .config/deluge2, …
+		TorrentDirGlob: ".config/deluge*/state",
+		CanMoveFiles:   true,
 	}, New)
 }
 

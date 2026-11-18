@@ -151,3 +151,64 @@ func TestRemoveAll(t *testing.T) {
 		t.Errorf("deleting something already gone should succeed, got %v", err)
 	}
 }
+
+func TestProbeDirs(t *testing.T) {
+	home := t.TempDir()
+	mk := func(rel string, files ...string) string {
+		d := filepath.Join(home, rel)
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			_ = os.WriteFile(filepath.Join(d, f), []byte("x"), 0o600)
+		}
+		return d
+	}
+	first := mk(".config/deluge/state", "aaa.torrent", "bbb.torrent", "torrents.state")
+	second := mk(".config/deluge2/state", "ccc.torrent", "ddd.torrent", "eee.torrent")
+	mk(".config/deluge-old") // no state folder: not a candidate
+	mk(".config/qBittorrent/state", "ccc.torrent")
+
+	addr, _ := serve(t, nil)
+	host, port := split(t, addr)
+	cfg := Config{Host: host, Port: port, User: "u", Password: "pw"}
+	ctx := context.Background()
+	glob := filepath.Join(home, ".config/deluge*/state")
+	names := []string{"ccc.torrent", "ddd.torrent", "fff.torrent"}
+
+	// The folder given is another daemon's: none of the names are there,
+	// and the other candidate is found.
+	given, found, _, err := ProbeDirs(ctx, cfg, first, glob, names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if given.Files != 2 || given.Matched != 0 {
+		t.Errorf("given = %+v, want 2 files, 0 matched", *given)
+	}
+	if len(found) != 1 || found[0].Dir != second || found[0].Files != 3 || found[0].Matched != 2 {
+		t.Errorf("found = %+v, want only %s with 3 files, 2 matched", found, second)
+	}
+
+	// No folder given: every candidate is reported.
+	given, found, _, err = ProbeDirs(ctx, cfg, "", glob, names)
+	if err != nil || given != nil || len(found) != 2 {
+		t.Fatalf("given %v, found %+v, err %v; want both candidates", given, found, err)
+	}
+
+	// A folder that isn't there is a DirError, not a login failure.
+	// The candidates are still reported, to suggest instead.
+	_, found, _, err = ProbeDirs(ctx, cfg, filepath.Join(home, "nope"), glob, names)
+	var dirErr *DirError
+	if !errors.As(err, &dirErr) {
+		t.Errorf("err = %v, want a *DirError", err)
+	}
+	if len(found) != 2 {
+		t.Errorf("found %+v beside a missing folder, want both candidates", found)
+	}
+
+	// Logging in failing is not a DirError.
+	_, _, _, err = ProbeDirs(ctx, Config{Host: host, Port: port, User: "u", Password: "nope"}, first, glob, names)
+	if err == nil || errors.As(err, &dirErr) {
+		t.Errorf("err = %v, want a login error", err)
+	}
+}

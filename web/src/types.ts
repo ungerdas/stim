@@ -142,7 +142,15 @@ export interface InstanceInput {
 export interface SSHTestResult {
   ok: boolean;
   error?: string;
-  torrents: number;
+  errorCode?: 'ssh-incomplete' | 'torrent-dir-missing' | 'torrent-dir-unreadable' | 'torrent-dir-wrong';
+  /** .torrent files in the folder given. */
+  torrents?: number;
+  /** How many torrents the client has, and how many of them have their file in the folder. */
+  clientTorrents?: number;
+  matched?: number;
+  /** A folder that looks like this client's, when the one given is missing or wrong. */
+  suggestion?: string;
+  suggestionMatched?: number;
   hostKey?: string;
   fingerprint?: string;
   newHostKey?: boolean;

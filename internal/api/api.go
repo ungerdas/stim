@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"mime"
@@ -341,34 +342,107 @@ func (s *Server) testInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	// The client and SSH are tested independently, so a typo in one does
 	// not hide the result of the other.
+	// For a client whose .torrent files Stim fetches over SSH, the hashes
+	// show whether the folder given is this client's.
+	info, _ := client.InfoFor(candidate.Kind)
+	needsDir := candidate.SSHHost != "" && info.TorrentDirHint != ""
 	res := map[string]any{"ok": true}
-	if version, err := manager.Test(r.Context(), candidate); err != nil {
+	version, hashes, err := manager.TestWithHashes(r.Context(), candidate, needsDir)
+	if err != nil {
 		res["ok"], res["error"], res["errorCode"] = false, err.Error(), client.ErrorCode(err)
 	} else {
 		res["version"] = version
 	}
 	if candidate.SSHHost != "" {
-		res["ssh"] = testSSH(r, candidate)
+		if needsDir {
+			res["ssh"] = testTorrentDir(r, candidate, info.TorrentDirGlob, hashes)
+		} else {
+			res["ssh"] = testSSH(r, candidate)
+		}
 	}
 	writeJSON(w, http.StatusOK, res)
 }
 
-// testSSH tries the SSH settings and lists the torrent folder.
+// SSH test outcomes the web UI explains in its own words.
+const (
+	sshIncomplete    = "ssh-incomplete"      // no user name, or neither password nor key
+	sshDirMissing    = "torrent-dir-missing" // the torrent folder is not filled in
+	sshDirUnreadable = "torrent-dir-unreadable"
+	sshDirWrong      = "torrent-dir-wrong" // none of the client's torrents has its file there
+)
+
+// testSSH tries the SSH settings of a client that says where each .torrent
+// file is: logging in and listing the home folder is all it needs.
 func testSSH(r *http.Request, in store.Instance) map[string]any {
 	cfg := in.SSHConfig()
 	if !cfg.Configured() {
-		return map[string]any{"ok": false, "error": "SSH needs a user name and a password or key"}
+		return map[string]any{"ok": false, "errorCode": sshIncomplete, "error": "SSH needs a user name and a password or key"}
 	}
-	// Clients that say where each .torrent file is need no folder; for them
-	// the test only checks that logging in and listing the home folder work.
-	dir := in.TorrentDir
-	if info, ok := client.InfoFor(in.Kind); ok && info.TorrentDirHint == "" {
-		dir = "."
-	} else if dir == "" {
-		return map[string]any{"ok": false, "error": "the torrent folder is not filled in"}
-	}
-	count, hostKey, err := remotefiles.Probe(r.Context(), cfg, dir)
+	count, hostKey, err := remotefiles.Probe(r.Context(), cfg, ".")
 	res := map[string]any{"ok": err == nil, "torrents": count}
+	addHostKey(res, cfg, hostKey, err)
+	return res
+}
+
+// testTorrentDir tries the SSH settings of a client whose .torrent files
+// Stim reads from a folder (Deluge's state folder). It checks that the
+// client's torrents have their files in the folder given, and looks for the
+// folder in the usual places to suggest one when it is missing or wrong.
+func testTorrentDir(r *http.Request, in store.Instance, glob string, hashes []string) map[string]any {
+	cfg := in.SSHConfig()
+	if !cfg.Configured() {
+		return map[string]any{"ok": false, "errorCode": sshIncomplete, "error": "SSH needs a user name and a password or key"}
+	}
+	names := make([]string, len(hashes))
+	for i, h := range hashes {
+		names[i] = h + ".torrent"
+	}
+	dir := strings.TrimSpace(in.TorrentDir)
+	given, found, hostKey, err := remotefiles.ProbeDirs(r.Context(), cfg, dir, glob, names)
+	res := map[string]any{"ok": err == nil}
+	addHostKey(res, cfg, hostKey, err)
+	var dirErr *remotefiles.DirError
+	if err != nil && !errors.As(err, &dirErr) {
+		return res // logging in failed
+	}
+	if hashes != nil {
+		res["clientTorrents"] = len(hashes)
+	}
+	// The best other folder: the most of this client's torrents, then the
+	// most .torrent files. Without hashes to go by, only a lone candidate.
+	var best *remotefiles.DirReport
+	for i := range found {
+		f := &found[i]
+		if best == nil || f.Matched > best.Matched || (f.Matched == best.Matched && f.Files > best.Files) {
+			best = f
+		}
+	}
+	suggest := func() {
+		if best != nil && (best.Matched > 0 || (len(hashes) == 0 && len(found) == 1)) {
+			res["suggestion"] = best.Dir
+			res["suggestionMatched"] = best.Matched
+		}
+	}
+	switch {
+	case dirErr != nil:
+		res["errorCode"] = sshDirUnreadable
+		suggest()
+	case dir == "":
+		res["ok"], res["errorCode"], res["error"] = false, sshDirMissing, "the torrent folder is not filled in"
+		suggest()
+	default:
+		res["torrents"], res["matched"] = given.Files, given.Matched
+		if len(hashes) > 0 && given.Matched == 0 {
+			res["ok"], res["errorCode"] = false, sshDirWrong
+			res["error"] = fmt.Sprintf("none of the client's %d torrents has its .torrent file in %s", len(hashes), given.Dir)
+			suggest()
+		}
+	}
+	return res
+}
+
+// addHostKey reports the key the server presented, and whether it changed.
+func addHostKey(res map[string]any, cfg remotefiles.Config, hostKey string, err error) {
 	if hostKey != "" {
 		res["hostKey"] = hostKey
 		res["fingerprint"] = remotefiles.Fingerprint(hostKey)
@@ -378,7 +452,6 @@ func testSSH(r *http.Request, in store.Instance) map[string]any {
 		res["error"] = err.Error()
 		res["hostKeyChanged"] = errors.Is(err, remotefiles.ErrHostKeyChanged)
 	}
-	return res
 }
 
 // remove removes torrents, and deletes their files only when the request

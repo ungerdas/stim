@@ -227,6 +227,9 @@ type Info struct {
 	// TorrentDirHint is the usual folder of the .torrent files, for clients
 	// whose API does not say where a torrent's file is. Empty when it does.
 	TorrentDirHint string `json:"torrentDirHint,omitempty"`
+	// TorrentDirGlob finds the folders the .torrent files may be in, relative
+	// to the home folder, for the SSH test to suggest one.
+	TorrentDirGlob string `json:"-"`
 	// CanMoveFiles is true when the client can move a torrent's files.
 	CanMoveFiles bool `json:"canMoveFiles"`
 }

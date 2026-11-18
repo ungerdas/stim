@@ -221,6 +221,78 @@ func Probe(ctx context.Context, cfg Config, dir string) (torrents int, hostKey s
 	return torrents, s.hostKey, nil
 }
 
+// DirReport describes a folder of .torrent files.
+type DirReport struct {
+	Dir     string `json:"dir"`
+	Files   int    `json:"files"`   // .torrent files in it
+	Matched int    `json:"matched"` // of the names asked about, how many it holds
+}
+
+// DirError is a folder that could not be listed, after logging in worked.
+type DirError struct {
+	Dir string
+	Err error
+}
+
+func (e *DirError) Error() string { return fmt.Sprintf("could not list %s: %v", e.Dir, e.Err) }
+func (e *DirError) Unwrap() error { return e.Err }
+
+// ProbeDirs logs in once and looks at dir (unless empty) and at every folder
+// matching glob (unless empty), relative to the home folder: how many
+// .torrent files each holds, and how many of names (file names such as
+// "<hash>.torrent") are among them. Failing to list dir is a *DirError;
+// folders found by glob that cannot be listed are left out. The host key is
+// the one the server presented, also when logging in failed.
+func ProbeDirs(ctx context.Context, cfg Config, dir, glob string, names []string) (given *DirReport, found []DirReport, hostKey string, err error) {
+	s, seen, err := open(ctx, cfg)
+	if err != nil {
+		return nil, nil, seen, err
+	}
+	defer s.Close()
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+	look := func(d string) (DirReport, error) {
+		entries, err := s.sftp.ReadDir(d)
+		if err != nil {
+			return DirReport{}, err
+		}
+		r := DirReport{Dir: d}
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".torrent") {
+				r.Files++
+				if want[e.Name()] {
+					r.Matched++
+				}
+			}
+		}
+		return r, nil
+	}
+	var dirErr error
+	if strings.TrimSpace(dir) != "" {
+		if r, err := look(clean(dir)); err != nil {
+			dirErr = &DirError{Dir: clean(dir), Err: err}
+		} else {
+			given = &r
+		}
+	}
+	// Candidates are looked at also when dir can't be listed: they are what
+	// to suggest instead.
+	if glob != "" {
+		matches, _ := s.sftp.Glob(clean(glob))
+		for _, m := range matches {
+			if m == clean(dir) {
+				continue
+			}
+			if r, err := look(m); err == nil {
+				found = append(found, r)
+			}
+		}
+	}
+	return given, found, s.hostKey, dirErr
+}
+
 // RemoveAll deletes a file or folder and everything in it. Because it
 // destroys data it never trusts a server on first contact: the host key
 // must already be stored. It also refuses paths that are relative, not
